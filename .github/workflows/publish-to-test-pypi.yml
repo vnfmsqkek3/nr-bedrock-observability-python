@@ -1,0 +1,38 @@
+name: Publish to Test PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # 수동 트리거도 허용
+
+jobs:
+  build-and-publish:
+    name: Build and publish to Test PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine wheel
+
+      - name: Build package
+        run: |
+          python -m build
+          twine check dist/*
+
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository_url: https://test.pypi.org/legacy/
+          skip_existing: true 
