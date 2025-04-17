@@ -6,13 +6,12 @@ setup(
     description="New Relic observability for AWS Bedrock",
     author="New Relic",
     author_email="opensource@newrelic.com",
-    url="https://github.com/yourusername/nr-bedrock-observability-python",
+    url="https://github.com/vnfmsqkek3/nr-bedrock-observability-python",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
         "newrelic>=8.0.0",
-        "boto3>=1.28.0",
-        "uuid"
+        "boto3>=1.28.0"
     ],
     extras_require={
         "dev": [
