@@ -4,7 +4,7 @@
 from .monitor import monitor_bedrock
 
 # 현재 버전을 업데이트하여 일관성 유지
-__version__ = "0.1.3"
+__version__ = "0.3.0"
 __all__ = ["monitor_bedrock"]
 
 # 직접 import를 위한 최상위 레벨 참조는 필요하지 않음
