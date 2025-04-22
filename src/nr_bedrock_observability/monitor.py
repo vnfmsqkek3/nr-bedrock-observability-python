@@ -111,7 +111,31 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_invoke_model)
             
-            # 응답 모니터링
+            # 트랜잭션 관리
+            try:
+                import newrelic.agent
+                app = newrelic.agent.application()
+                if app:
+                    # 트랜잭션 시작
+                    with newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/invoke_model"):
+                        # 응답 모니터링
+                        return monitor_response(
+                            lambda: invoke_model_func(*args, **kwargs),
+                            lambda response_info: _handle_invoke_model_response(
+                                request, 
+                                response_info, 
+                                completion_event_data_factory, 
+                                event_client
+                            )
+                        )
+                else:
+                    logger.warning("New Relic 애플리케이션을 찾을 수 없습니다. 트랜잭션 없이 진행합니다.")
+            except ImportError:
+                logger.debug("New Relic 에이전트를 임포트할 수 없습니다. 트랜잭션 없이 진행합니다.")
+            except Exception as e:
+                logger.error(f"트랜잭션 생성 중 오류: {str(e)}")
+            
+            # 트랜잭션 없이 진행 (에러 발생 또는 New Relic 없음)
             return monitor_response(
                 lambda: invoke_model_func(*args, **kwargs),
                 lambda response_info: _handle_invoke_model_response(
@@ -139,7 +163,31 @@ def monitor_bedrock(
                 # 이벤트 없이 원본 함수 호출
                 return invoke_model_with_response_stream_func(*args, **kwargs)
             
-            # 응답 모니터링
+            # 트랜잭션 관리
+            try:
+                import newrelic.agent
+                app = newrelic.agent.application()
+                if app:
+                    # 트랜잭션 시작
+                    with newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/invoke_model_with_response_stream"):
+                        # 응답 모니터링
+                        return monitor_streaming_response(
+                            lambda: invoke_model_with_response_stream_func(*args, **kwargs),
+                            lambda response_info: _handle_invoke_model_stream_response(
+                                request, 
+                                response_info, 
+                                completion_event_data_factory, 
+                                event_client
+                            )
+                        )
+                else:
+                    logger.warning("New Relic 애플리케이션을 찾을 수 없습니다. 트랜잭션 없이 진행합니다.")
+            except ImportError:
+                logger.debug("New Relic 에이전트를 임포트할 수 없습니다. 트랜잭션 없이 진행합니다.")
+            except Exception as e:
+                logger.error(f"트랜잭션 생성 중 오류: {str(e)}")
+            
+            # 트랜잭션 없이 진행 (에러 발생 또는 New Relic 없음)
             return monitor_streaming_response(
                 lambda: invoke_model_with_response_stream_func(*args, **kwargs),
                 lambda response_info: _handle_invoke_model_stream_response(
@@ -464,7 +512,32 @@ def _handle_invoke_model_response(
     
     # 이벤트 전송
     if event_data:
-        client.send(event_data)
+        # 디버그 로깅을 위한 추가
+        logger.info(f"LLM 이벤트 생성: {event_data.get('eventType', 'Unknown')} - New Relic 전송 중")
+        
+        # 직접 New Relic에 이벤트 기록 시도
+        try:
+            import newrelic.agent
+            nr_app = newrelic.agent.application()
+            if nr_app:
+                # 이벤트 타입과 속성 추출
+                event_type = event_data.get('eventType')
+                attributes = event_data.get('attributes', {})
+                # New Relic에 직접 이벤트 기록
+                newrelic.agent.record_custom_event(event_type, attributes, application=nr_app)
+                logger.info(f"New Relic에 직접 이벤트 기록 성공: {event_type}")
+            else:
+                # 앱이 없으면 일반적인 방식으로 이벤트 전송
+                client.send(event_data)
+                logger.info("일반 이벤트 클라이언트를 통해 이벤트 전송")
+        except ImportError:
+            # New Relic이 없으면 일반적인 방식으로 이벤트 전송
+            client.send(event_data)
+            logger.info("New Relic을 임포트할 수 없음, 일반 클라이언트로 전송")
+        except Exception as e:
+            logger.error(f"직접 이벤트 기록 중 오류: {str(e)}")
+            # 오류 발생 시 일반적인 방식으로 이벤트 전송
+            client.send(event_data)
 
 def _handle_invoke_model_stream_response(
     request: Dict[str, Any],
@@ -510,7 +583,32 @@ def _handle_invoke_model_stream_response(
     
     # 이벤트 전송
     if event_data:
-        client.send(event_data)
+        # 디버그 로깅을 위한 추가
+        logger.info(f"LLM 스트리밍 이벤트 생성: {event_data.get('eventType', 'Unknown')} - New Relic 전송 중")
+        
+        # 직접 New Relic에 이벤트 기록 시도
+        try:
+            import newrelic.agent
+            nr_app = newrelic.agent.application()
+            if nr_app:
+                # 이벤트 타입과 속성 추출
+                event_type = event_data.get('eventType')
+                attributes = event_data.get('attributes', {})
+                # New Relic에 직접 이벤트 기록
+                newrelic.agent.record_custom_event(event_type, attributes, application=nr_app)
+                logger.info(f"New Relic에 직접 스트리밍 이벤트 기록 성공: {event_type}")
+            else:
+                # 앱이 없으면 일반적인 방식으로 이벤트 전송
+                client.send(event_data)
+                logger.info("일반 이벤트 클라이언트를 통해 스트리밍 이벤트 전송")
+        except ImportError:
+            # New Relic이 없으면 일반적인 방식으로 이벤트 전송
+            client.send(event_data)
+            logger.info("New Relic을 임포트할 수 없음, 일반 클라이언트로 스트리밍 이벤트 전송")
+        except Exception as e:
+            logger.error(f"직접 스트리밍 이벤트 기록 중 오류: {str(e)}")
+            # 오류 발생 시 일반적인 방식으로 이벤트 전송
+            client.send(event_data)
 
 def _handle_converse_response(
     request: Dict[str, Any],
