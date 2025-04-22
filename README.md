@@ -6,6 +6,14 @@
 
 AWS Bedrock API 호출을 위한 New Relic 관찰성 라이브러리입니다. 이 라이브러리를 사용하면 AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전송할 수 있습니다.
 
+## 최신 업데이트 (v0.2.0)
+
+- 새로운 이벤트 속성 체계 개선
+- `CommonSummaryAttributes` 클래스 추가로 이벤트 데이터 표준화
+- 테스트 오류 수정 및 안정성 개선
+- AWS 리전 지정 필요성 명시
+- API 키가 없는 환경에서도 테스트용 키로 실행 가능
+
 ## 설치
 
 PyPI에서 패키지를 설치합니다:
@@ -23,8 +31,8 @@ import boto3
 import json
 from nr_bedrock_observability import monitor_bedrock
 
-# Bedrock 클라이언트 생성
-bedrock_client = boto3.client('bedrock-runtime')
+# Bedrock 클라이언트 생성 (리전 필수 지정)
+bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
 
 # 모니터링 설정
 monitor_bedrock(bedrock_client, {
@@ -243,6 +251,18 @@ if hasattr(response, 'citations') and response.citations:
         print(f"- {citation.retrievedReferences[0].content[:100]}...")
 ```
 
+## 이벤트 데이터 구조
+
+이 라이브러리는 이벤트 데이터를 구조화하기 위해 다음과 같은 클래스를 제공합니다:
+
+- `EventType`: 이벤트 유형 정의 (LlmCompletion, LlmChatCompletionSummary 등)
+- `CommonSummaryAttributes`: 모든 요약 이벤트에 공통으로 포함되는 속성
+- `ChatCompletionSummaryAttributes`: 채팅 완성 요약 속성
+- `ChatCompletionMessageAttributes`: 채팅 메시지 속성
+- `EmbeddingAttributes`: 임베딩 속성
+- `CompletionAttributes`: 완성 속성
+- `BedrockError`: AWS Bedrock API 오류 정보
+
 ## New Relic 데이터
 
 이 라이브러리를 사용하면 다음과 같은 이벤트가 New Relic에 보고됩니다:
@@ -282,6 +302,12 @@ monitor_bedrock(bedrock_client, {
 pip install -e ".[dev]"
 pytest
 ```
+
+### 주의사항
+
+- 테스트 실행 시 `boto3.client('bedrock-runtime')` 호출에 `region_name`을 반드시 지정해야 합니다.
+- New Relic API 키가 없어도 테스트는 자동으로 테스트용 키를 사용합니다.
+- 단위 테스트는 실제 AWS 리소스에 접근하지 않고 모킹(mocking)을 통해 실행됩니다.
 
 ### 로컬에서 빌드하기
 
