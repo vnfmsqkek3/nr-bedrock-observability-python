@@ -1,11 +1,13 @@
 """New Relic observability for AWS Bedrock."""
 
-# 모니터링 함수 직접 노출
+# 모듈을 직접 import하면 monitor_bedrock 함수 사용 가능
 from .monitor import monitor_bedrock
 
-# 현재 버전을 업데이트하여 일관성 유지
+# 패키지 버전 정보
 __version__ = "0.3.0"
-__all__ = ["monitor_bedrock"]
+
+# 공개 API
+__all__ = ['monitor_bedrock']
 
 # 직접 import를 위한 최상위 레벨 참조는 필요하지 않음
 # monitor_bedrock이 이미 .monitor에서 import되어 있으므로
