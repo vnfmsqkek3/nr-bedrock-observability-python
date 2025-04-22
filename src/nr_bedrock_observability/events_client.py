@@ -77,8 +77,26 @@ class BedrockEventClient:
                 
             if NEWRELIC_AVAILABLE:
                 # New Relic Python Agent로 이벤트 직접 전송
-                newrelic.agent.record_custom_event(event_type, attributes)
-                logger.debug(f"Event sent to New Relic: {event_type}")
+                try:
+                    # 애플리케이션 객체 가져오기
+                    app = newrelic.agent.application()
+                    if app:
+                        # 트랜잭션 내에서 이벤트 기록
+                        with newrelic.agent.BackgroundTask(app, name=f"EventRecording/{event_type}"):
+                            newrelic.agent.record_custom_event(event_type, attributes, application=app)
+                            logger.debug(f"Event sent to New Relic within transaction: {event_type}")
+                    else:
+                        # 애플리케이션 없이 기록 시도
+                        newrelic.agent.record_custom_event(event_type, attributes)
+                        logger.debug(f"Event sent to New Relic without application: {event_type}")
+                except Exception as e:
+                    logger.error(f"Error recording event with transaction: {str(e)}")
+                    # 에러 발생 시 기본 방식으로 다시 시도
+                    try:
+                        newrelic.agent.record_custom_event(event_type, attributes)
+                        logger.debug(f"Event sent to New Relic using fallback: {event_type}")
+                    except Exception as e2:
+                        logger.error(f"Error recording event using fallback: {str(e2)}")
             else:
                 # 에이전트 없이 사용 시 이벤트 대기열에 추가 (향후 구현)
                 self.event_queue.append({
