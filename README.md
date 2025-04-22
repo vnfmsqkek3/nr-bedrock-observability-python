@@ -127,7 +127,10 @@ monitor_options = {
     'track_token_usage': True,
     
     # 스트리밍 이벤트 비활성화 (대용량 트래픽 시 유용, 기본값: False)
-    'disable_streaming_events': False
+    'disable_streaming_events': False,
+    
+    # New Relic 애플리케이션 객체 (트랜잭션 관리에 필요)
+    'application': nr_application
 }
 ```
 
@@ -189,62 +192,101 @@ if "content" in response_body and len(response_body["content"]) > 0:
 import boto3
 import json
 from nr_bedrock_observability import monitor_bedrock
+import newrelic.agent
 
-# Bedrock 클라이언트 생성
-bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
+# New Relic 애플리케이션 객체 얻기
+nr_application = newrelic.agent.application()
 
-# 모니터링 설정
-monitor_bedrock(bedrock, {'application_name': 'MyStreamingApp'})
+# 트랜잭션 시작 함수
+def start_transaction(name):
+    transaction = None
+    if nr_application:
+        print(f"New Relic 트랜잭션 시작: {name}")
+        transaction = newrelic.agent.BackgroundTask(nr_application, name=f"Python/{name}")
+        transaction.__enter__()
+    return transaction
 
-# 스트리밍 응답으로 Claude 3.5 Sonnet 모델 호출
-stream_response = bedrock.invoke_model_with_response_stream(
-    modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
-    body=json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 300,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "구름에 대한 짧은 시를 써줘."
-                    }
-                ]
-            }
-        ],
-        "temperature": 0.7
-    })
-)
+# 트랜잭션 종료 함수
+def end_transaction(transaction):
+    if transaction:
+        print("New Relic 트랜잭션 종료")
+        transaction.__exit__(None, None, None)
 
-# 스트리밍 응답 처리
-full_response = ""
-for event in stream_response['body']:
-    chunk_bytes = event['chunk']['bytes']
-    chunk_str = chunk_bytes.decode('utf-8')
+# 스트리밍 테스트 함수
+def test_streaming_completion():
+    # 트랜잭션 시작
+    transaction = start_transaction("test_streaming_completion")
     
     try:
-        chunk = json.loads(chunk_str)
+        # Bedrock 클라이언트 생성
+        bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
         
-        # 다양한 응답 형식 처리
-        if 'content' in chunk and len(chunk['content']) > 0:
-            for content_item in chunk['content']:
-                if content_item.get('type') == 'text':
-                    chunk_text = content_item.get('text', '')
+        # 모니터링 설정 - 애플리케이션 객체 직접 전달
+        monitor_options = {
+            'application_name': 'MyStreamingApp',
+            'application': nr_application
+        }
+        
+        monitored_client = monitor_bedrock(bedrock, monitor_options)
+        
+        # 스트리밍 응답으로 Claude 3.5 Sonnet 모델 호출
+        stream_response = monitored_client.invoke_model_with_response_stream(
+            modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 300,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "구름에 대한 짧은 시를 써줘."
+                            }
+                        ]
+                    }
+                ],
+                "temperature": 0.7
+            })
+        )
+
+        # 스트리밍 응답 처리
+        full_response = ""
+        for event in stream_response['body']:
+            chunk_bytes = event['chunk']['bytes']
+            chunk_str = chunk_bytes.decode('utf-8')
+            
+            try:
+                chunk = json.loads(chunk_str)
+                
+                # 다양한 응답 형식 처리
+                if 'content' in chunk and len(chunk['content']) > 0:
+                    for content_item in chunk['content']:
+                        if content_item.get('type') == 'text':
+                            chunk_text = content_item.get('text', '')
+                            full_response += chunk_text
+                            print(chunk_text, end='', flush=True)
+                elif 'completion' in chunk:
+                    chunk_text = chunk['completion']
                     full_response += chunk_text
                     print(chunk_text, end='', flush=True)
-        elif 'completion' in chunk:
-            chunk_text = chunk['completion']
-            full_response += chunk_text
-            print(chunk_text, end='', flush=True)
-        elif 'outputText' in chunk:
-            chunk_text = chunk['outputText']
-            full_response += chunk_text
-            print(chunk_text, end='', flush=True)
-    except json.JSONDecodeError:
-        print(f"JSON 파싱 오류: {chunk_str}")
+                elif 'outputText' in chunk:
+                    chunk_text = chunk['outputText']
+                    full_response += chunk_text
+                    print(chunk_text, end='', flush=True)
+                elif 'delta' in chunk and 'text' in chunk['delta']:
+                    chunk_text = chunk['delta']['text']
+                    full_response += chunk_text
+                    print(chunk_text, end='', flush=True)
+            except json.JSONDecodeError:
+                print(f"JSON 파싱 오류: {chunk_str}")
+                
+    finally:
+        # 트랜잭션 종료
+        end_transaction(transaction)
 
-print("\n\n완료됨!")
+# 함수 호출
+test_streaming_completion()
 ```
 
 ### RAG API 사용
@@ -342,6 +384,7 @@ monitor_bedrock(bedrock_client, {
 
 ```python
 import newrelic.agent
+import uuid
 from nr_bedrock_observability import monitor_bedrock
 
 # New Relic 애플리케이션 객체 얻기
@@ -426,7 +469,15 @@ def test_streaming_completion():
         for event in stream_response['body']:
             chunk_bytes = event['chunk']['bytes']
             chunk_str = chunk_bytes.decode('utf-8')
-            # 청크 처리 로직
+            try:
+                chunk = json.loads(chunk_str)
+                # 다양한 응답 형식 처리
+                if 'delta' in chunk and 'text' in chunk['delta']:
+                    chunk_text = chunk['delta']['text']
+                    print(chunk_text, end='', flush=True)
+                # 기타 형식 처리
+            except json.JSONDecodeError:
+                print(f"JSON 파싱 오류: {chunk_str}")
     
     finally:
         # 트랜잭션 종료
@@ -435,11 +486,41 @@ def test_streaming_completion():
 
 ## 이벤트 로깅 최적화
 
-이벤트 로깅이 제대로 되지 않는 경우, 다음과 같이 이벤트 클라이언트를 수동으로 설정할 수 있습니다:
+이벤트 로깅이 제대로 되지 않는 경우, 다음과 같이 이벤트 클라이언트를 커스텀하게 설정할 수 있습니다:
 
 ```python
 from nr_bedrock_observability.events_client import BedrockEventClient
 
+# 커스텀 이벤트 리스너 클래스 정의
+class EventLogger:
+    def __init__(self, app=None):
+        self.events = []
+        self.app = app
+    
+    def log_event(self, event_type, attributes):
+        print(f"New Relic 이벤트 전송: {event_type}")
+        self.events.append({"event_type": event_type, "attributes": attributes})
+
+# 이벤트 로거 초기화
+event_logger = EventLogger(app=nr_application)
+
+# New Relic 에이전트 커스텀 이벤트 기록 함수 패치
+if nr_application and hasattr(newrelic.agent, 'record_custom_event'):
+    original_record_custom_event = newrelic.agent.record_custom_event
+    
+    def custom_record_event(event_type, attributes, application=None):
+        print(f"New Relic 이벤트 감지: {event_type}")
+        event_logger.log_event(event_type, attributes)
+        # 명시적으로 애플리케이션 객체 전달
+        return original_record_custom_event(event_type, attributes, application=nr_application)
+    
+    newrelic.agent.record_custom_event = custom_record_event
+    print("New Relic 커스텀 이벤트 로깅이 활성화되었습니다.")
+```
+
+또는 이벤트 클라이언트를 패치할 수 있습니다:
+
+```python
 # 이벤트 클라이언트 패치
 if nr_application:
     # 원본 send 메서드 저장
