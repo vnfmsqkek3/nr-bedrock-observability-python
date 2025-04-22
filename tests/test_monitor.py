@@ -75,7 +75,7 @@ class TestMonitorBedrock:
         mock_create_event_client.assert_called_once()
 
 # 테스트 실행
-bedrock_client = boto3.client('bedrock-runtime')
+bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
 monitored_client = monitor_bedrock(
     bedrock_client=bedrock_client,
     options={
