@@ -3,6 +3,7 @@ import json
 import boto3
 import time
 import logging
+import uuid
 from botocore.config import Config
 # 패키지 임포트
 from nr_bedrock_observability import monitor_bedrock
@@ -12,6 +13,10 @@ def setup_logging():
     # 루트 로거 설정
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
+    
+    # 기존 핸들러 제거 (중복 로깅 방지)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
     
     # 콘솔 핸들러 추가
     console = logging.StreamHandler()
@@ -60,29 +65,47 @@ def check_newrelic_config():
 # New Relic 키 설정 (디버깅을 위해 임시 테스트 키 사용)
 NEW_RELIC_LICENSE_KEY = check_newrelic_config() or "test_license_key_for_debugging"
 
+# New Relic 애플리케이션 설정
+nr_application = None
+try:
+    # New Relic 에이전트 임포트
+    import newrelic.agent
+    
+    # 앱 이름 설정
+    app_name = os.environ.get('NEW_RELIC_APP_NAME') or 'Bedrock-Test-App'
+    
+    # 명시적으로 애플리케이션 초기화
+    if not newrelic.agent.application():
+        logger.info(f"New Relic 애플리케이션 초기화: {app_name}")
+        try:
+            # 애플리케이션 등록
+            nr_application = newrelic.agent.register_application(
+                name=app_name,
+                license_key=NEW_RELIC_LICENSE_KEY,
+                log_level='debug'
+            )
+            logger.info(f"New Relic 애플리케이션이 성공적으로 등록되었습니다. app_name={app_name}")
+        except Exception as e:
+            logger.error(f"New Relic 애플리케이션 등록 오류: {str(e)}")
+    else:
+        nr_application = newrelic.agent.application()
+        logger.info(f"기존 New Relic 애플리케이션 사용: {nr_application}")
+    
+    # 에이전트 설정 출력
+    logger.info(f"New Relic 에이전트 버전: {newrelic.version.version_string()}")
+    logger.info(f"New Relic 에이전트 활성화 상태: {newrelic.agent.agent_instance() is not None}")
+    
+except ImportError:
+    logger.warning("New Relic 에이전트가 설치되어 있지 않습니다.")
+    nr_application = None
+except Exception as e:
+    logger.error(f"New Relic 에이전트 초기화 오류: {str(e)}")
+    nr_application = None
+
 # AWS Bedrock 클라이언트 설정
 bedrock_region = "ap-northeast-2"  # 리전 필수 지정 (v0.3.0에서 강조)
 model_id = "anthropic.claude-3-5-sonnet-20240620-v1:0"  # Claude 3.5 Sonnet
 logger.info(f"리전: {bedrock_region}, 모델 ID: {model_id}")
-
-try:
-    # New Relic 에이전트 확인
-    import newrelic.agent
-    logger.info("New Relic 에이전트가 설치되어 있습니다.")
-    
-    # 에이전트 설정 덮어쓰기
-    if not os.environ.get('NEW_RELIC_APP_NAME'):
-        logger.info("New Relic 앱 이름 설정")
-        os.environ['NEW_RELIC_APP_NAME'] = 'Bedrock-Test-App'
-    
-    # 에이전트 설정 출력
-    logger.info(f"New Relic 에이전트 버전: {newrelic.version.version_string()}")
-    logger.info(f"New Relic 에이전트 활성화 상태: {newrelic.agent.agent_instance()}")
-    
-except ImportError:
-    logger.warning("New Relic 에이전트가 설치되어 있지 않습니다.")
-except Exception as e:
-    logger.error(f"New Relic 에이전트 초기화 오류: {str(e)}")
 
 # boto3 클라이언트 설정
 boto_config = Config(
@@ -103,8 +126,9 @@ bedrock_client = boto3.client(
 
 # 커스텀 이벤트 리스너 클래스 정의
 class EventLogger:
-    def __init__(self):
+    def __init__(self, app=None):
         self.events = []
+        self.app = app
     
     def log_event(self, event_type, attributes):
         logger.info(f"New Relic 이벤트 전송: {event_type}")
@@ -115,19 +139,21 @@ class EventLogger:
         return self.events
 
 # 이벤트 로거 초기화
-event_logger = EventLogger()
+event_logger = EventLogger(app=nr_application)
 
 # New Relic 에이전트 커스텀 이벤트 기록 함수 패치
 try:
-    original_record_custom_event = newrelic.agent.record_custom_event
-    
-    def custom_record_event(event_type, attributes):
-        logger.info(f"New Relic 이벤트 감지: {event_type}")
-        event_logger.log_event(event_type, attributes)
-        return original_record_custom_event(event_type, attributes)
-    
-    newrelic.agent.record_custom_event = custom_record_event
-    logger.info("New Relic 커스텀 이벤트 로깅이 활성화되었습니다.")
+    if nr_application and hasattr(newrelic.agent, 'record_custom_event'):
+        original_record_custom_event = newrelic.agent.record_custom_event
+        
+        def custom_record_event(event_type, attributes, application=None):
+            logger.info(f"New Relic 이벤트 감지: {event_type}")
+            event_logger.log_event(event_type, attributes)
+            # 명시적으로 애플리케이션 객체 전달
+            return original_record_custom_event(event_type, attributes, application=nr_application)
+        
+        newrelic.agent.record_custom_event = custom_record_event
+        logger.info("New Relic 커스텀 이벤트 로깅이 활성화되었습니다.")
 except Exception as e:
     logger.error(f"New Relic 패치 오류: {str(e)}")
 
@@ -143,11 +169,41 @@ monitor_options = {
 logger.info(f"New Relic 모니터링 초기화: {monitor_options}")
 monitored_client = monitor_bedrock(bedrock_client, monitor_options)
 
+# 트랜잭션 시작 함수
+def start_transaction(name):
+    transaction = None
+    try:
+        if nr_application:
+            transaction_name = f"Python/{name}"
+            logger.info(f"New Relic 트랜잭션 시작: {transaction_name}")
+            transaction = newrelic.agent.BackgroundTask(nr_application, name=transaction_name)
+            transaction.__enter__()
+            logger.info("트랜잭션이 성공적으로 시작되었습니다.")
+        else:
+            logger.warning("New Relic 애플리케이션이 초기화되지 않아 트랜잭션을 시작할 수 없습니다.")
+    except Exception as e:
+        logger.error(f"트랜잭션 시작 오류: {str(e)}")
+        transaction = None
+    return transaction
+
+# 트랜잭션 종료 함수
+def end_transaction(transaction):
+    try:
+        if transaction:
+            logger.info("New Relic 트랜잭션 종료")
+            transaction.__exit__(None, None, None)
+            logger.info("트랜잭션이 성공적으로 종료되었습니다.")
+    except Exception as e:
+        logger.error(f"트랜잭션 종료 오류: {str(e)}")
+
 def test_chat_completion():
     """
     Claude 3.5 Sonnet을 사용한 채팅 완성 API 테스트
     이 함수는 README.md의 예제와 일관성을 유지합니다.
     """
+    # 트랜잭션 시작
+    transaction = start_transaction("test_chat_completion")
+    
     try:
         # Claude 3.5 Sonnet 모델 요청 형식
         request_body = {
@@ -193,6 +249,10 @@ def test_chat_completion():
                 if content_item.get("type") == "text":
                     logger.info(content_item.get("text", ""))
         
+        # 이벤트가 New Relic에 제대로 기록되었는지 확인
+        # New Relic은 비동기적으로 이벤트를 처리하므로 잠시 대기
+        time.sleep(1)
+        
         # v0.3.0에서는 CommonSummaryAttributes 클래스를 사용해 표준화된 이벤트 데이터가 New Relic에 전송됩니다
         logger.info("\n이 요청은 New Relic에 다음 이벤트를 전송합니다:")
         logger.info("- LlmChatCompletionSummary: 채팅 완성 요약 정보")
@@ -210,11 +270,18 @@ def test_chat_completion():
         import traceback
         traceback.print_exc()
         return None
+    
+    finally:
+        # 트랜잭션 종료
+        end_transaction(transaction)
 
 def test_streaming_completion():
     """
     스트리밍 응답 API 테스트 (v0.3.0에서 개선됨)
     """
+    # 트랜잭션 시작
+    transaction = start_transaction("test_streaming_completion")
+    
     try:
         # Claude 3.5 Sonnet 모델 요청 형식 (스트리밍용)
         request_body = {
@@ -299,26 +366,38 @@ def test_streaming_completion():
         import traceback
         traceback.print_exc()
         return None
+    
+    finally:
+        # 트랜잭션 종료
+        end_transaction(transaction)
 
 
 def main():
-    logger.info("\n== AWS Bedrock API 테스트 (v0.3.0) ==")
+    # 메인 트랜잭션 시작
+    transaction = start_transaction("main")
     
-    logger.info("\n1. 채팅 완성 테스트 시작...")
-    chat_result = test_chat_completion()
-    
-    logger.info("\n2. 스트리밍 테스트 시작...")
     try:
-        stream_result = test_streaming_completion()
-    except Exception as e:
-        logger.error(f"스트리밍 테스트를 건너뜁니다: {str(e)}")
+        logger.info("\n== AWS Bedrock API 테스트 (v0.3.0) ==")
+        
+        logger.info("\n1. 채팅 완성 테스트 시작...")
+        chat_result = test_chat_completion()
+        
+        logger.info("\n2. 스트리밍 테스트 시작...")
+        try:
+            stream_result = test_streaming_completion()
+        except Exception as e:
+            logger.error(f"스트리밍 테스트를 건너뜁니다: {str(e)}")
+        
+        logger.info("\n테스트 완료!")
+        logger.info(f"기록된 총 New Relic 이벤트: {len(event_logger.get_events())}개")
+        for idx, event in enumerate(event_logger.get_events()):
+            logger.info(f"{idx+1}. {event['event_type']}")
+        
+        logger.info("New Relic 대시보드에서 'LlmCompletion', 'LlmChatCompletionSummary', 'LlmChatCompletionMessage' 이벤트를 확인하세요.")
     
-    logger.info("\n테스트 완료!")
-    logger.info(f"기록된 총 New Relic 이벤트: {len(event_logger.get_events())}개")
-    for idx, event in enumerate(event_logger.get_events()):
-        logger.info(f"{idx+1}. {event['event_type']}")
-    
-    logger.info("New Relic 대시보드에서 'LlmCompletion', 'LlmChatCompletionSummary', 'LlmChatCompletionMessage' 이벤트를 확인하세요.")
+    finally:
+        # 메인 트랜잭션 종료
+        end_transaction(transaction)
 
 if __name__ == "__main__":
     main()
