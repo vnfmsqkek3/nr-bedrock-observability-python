@@ -1,15 +1,16 @@
 import time
 import logging
-from typing import Dict, Any, Optional, Union, Callable, TypeVar, cast
+from typing import Dict, Any, Optional, Union, Callable, TypeVar, cast, List
 import inspect
 import json
 
-from .events_client import create_event_client, EventClientOptions, BedrockEventClient
+from .events_client import create_event_client, EventClientOptions
 from .event_data_factory import (
     BedrockCompletionEventDataFactory,
     BedrockChatCompletionEventDataFactory,
     BedrockEmbeddingEventDataFactory
 )
+from .event_types import create_error_from_exception
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,16 @@ class MonitorBedrockOptions:
         application_name: str,
         new_relic_api_key: Optional[str] = None,
         host: Optional[str] = None,
-        port: Optional[int] = None
+        port: Optional[int] = None,
+        track_token_usage: bool = True,
+        disable_streaming_events: bool = False
     ):
         self.application_name = application_name
         self.new_relic_api_key = new_relic_api_key
         self.host = host
         self.port = port
+        self.track_token_usage = track_token_usage
+        self.disable_streaming_events = disable_streaming_events
 
 def monitor_bedrock(
     bedrock_client: Any,
@@ -53,7 +58,9 @@ def monitor_bedrock(
             application_name=options['application_name'],
             new_relic_api_key=options.get('new_relic_api_key'),
             host=options.get('host'),
-            port=options.get('port')
+            port=options.get('port'),
+            track_token_usage=options.get('track_token_usage', True),
+            disable_streaming_events=options.get('disable_streaming_events', False)
         )
     else:
         monitor_options = options
@@ -84,7 +91,9 @@ def monitor_bedrock(
     
     # 원본 메서드 저장
     original_invoke_model = bedrock_client.invoke_model
-    original_converse = bedrock_client.converse
+    original_invoke_model_with_response_stream = getattr(bedrock_client, 'invoke_model_with_response_stream', None)
+    original_converse = getattr(bedrock_client, 'converse', None)
+    original_generate_with_model = getattr(bedrock_client, 'generate_with_model', None)
     
     # API 패치 함수
     def patch_invoke_model(
@@ -110,6 +119,34 @@ def monitor_bedrock(
             
         return patched_invoke_model
     
+    def patch_invoke_model_with_response_stream(
+        invoke_model_with_response_stream_func: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        """
+        invoke_model_with_response_stream 함수 패치
+        """
+        def patched_invoke_model_with_response_stream(*args, **kwargs):
+            # 요청 정보 추출
+            request = _extract_request_from_args_kwargs(args, kwargs, original_invoke_model_with_response_stream)
+            
+            # 스트리밍 이벤트 비활성화 확인
+            if monitor_options.disable_streaming_events:
+                # 이벤트 없이 원본 함수 호출
+                return invoke_model_with_response_stream_func(*args, **kwargs)
+            
+            # 응답 모니터링
+            return monitor_streaming_response(
+                lambda: invoke_model_with_response_stream_func(*args, **kwargs),
+                lambda response_info: _handle_invoke_model_stream_response(
+                    request, 
+                    response_info, 
+                    completion_event_data_factory, 
+                    event_client
+                )
+            )
+            
+        return patched_invoke_model_with_response_stream
+    
     def patch_converse(
         converse_func: Callable[..., Any]
     ) -> Callable[..., Any]:
@@ -133,9 +170,47 @@ def monitor_bedrock(
             
         return patched_converse
     
+    def patch_generate_with_model(
+        generate_with_model_func: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        """
+        generate_with_model 함수 패치 (AWS Bedrock용 RAG API)
+        """
+        def patched_generate_with_model(*args, **kwargs):
+            # 요청 정보 추출
+            request = _extract_request_from_args_kwargs(args, kwargs, original_generate_with_model)
+            
+            # 응답 모니터링
+            return monitor_response(
+                lambda: generate_with_model_func(*args, **kwargs),
+                lambda response_info: _handle_generate_with_model_response(
+                    request, 
+                    response_info, 
+                    completion_event_data_factory, 
+                    event_client
+                )
+            )
+            
+        return patched_generate_with_model
+    
     # Bedrock 클라이언트 패치
     bedrock_client.invoke_model = patch_invoke_model(original_invoke_model)
-    bedrock_client.converse = patch_converse(original_converse)
+    
+    # Stream API가 있는 경우 패치
+    if original_invoke_model_with_response_stream:
+        bedrock_client.invoke_model_with_response_stream = patch_invoke_model_with_response_stream(
+            original_invoke_model_with_response_stream
+        )
+    
+    # Converse API가 있는 경우 패치
+    if original_converse:
+        bedrock_client.converse = patch_converse(original_converse)
+    
+    # generate_with_model API가 있는 경우 패치
+    if original_generate_with_model:
+        bedrock_client.generate_with_model = patch_generate_with_model(
+            original_generate_with_model
+        )
     
     # 임베딩 메서드가 있는지 확인
     if hasattr(bedrock_client, 'create_embedding'):
@@ -199,9 +274,10 @@ def monitor_response(
         
     except Exception as error:
         try:
+            error_obj = create_error_from_exception(error)
             on_response({
                 'response': None,
-                'response_error': error,
+                'response_error': error_obj,
                 'duration': int((time.time() - start_time) * 1000)  # 밀리초 단위
             })
         except Exception as e:
@@ -209,33 +285,147 @@ def monitor_response(
             
         raise
 
+def monitor_streaming_response(
+    call: Callable[[], T],
+    on_response: Callable[[Dict[str, Any]], None]
+) -> T:
+    """
+    스트리밍 응답을 모니터링하고 New Relic에 데이터 전송
+    
+    :param call: API 호출 함수
+    :param on_response: 응답 처리 콜백
+    :return: 래핑된 스트리밍 응답
+    """
+    start_time = time.time()
+    
+    try:
+        response = call()
+        
+        # 응답 메타데이터 처리
+        try:
+            # 응답 헤더 및 메타데이터만 처리
+            stream_metadata = {
+                'ResponseMetadata': response.get('ResponseMetadata', {}),
+                'contentType': response.get('contentType', ''),
+                'is_streaming': True
+            }
+            
+            # 스트리밍 이벤트 시작 시 기록
+            on_response({
+                'response': stream_metadata,
+                'response_error': None,
+                'duration': int((time.time() - start_time) * 1000),
+                'is_stream_start': True
+            })
+            
+            # 원래 응답을 그대로 반환
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error processing streaming response metadata: {str(e)}")
+            return response
+            
+    except Exception as error:
+        try:
+            error_obj = create_error_from_exception(error)
+            on_response({
+                'response': None,
+                'response_error': error_obj,
+                'duration': int((time.time() - start_time) * 1000)
+            })
+        except Exception as e:
+            logger.error(f"Error processing streaming error response: {str(e)}")
+            
+        raise
+
 def _extract_request_from_args_kwargs(args, kwargs, original_func):
     """
     함수 인자에서 요청 정보 추출
     """
+    if not original_func:
+        return {}
+        
     request = {}
     
     # 함수 파라미터 목록 가져오기
-    signature = inspect.signature(original_func)
-    parameters = list(signature.parameters.keys())
+    try:
+        signature = inspect.signature(original_func)
+        parameters = list(signature.parameters.keys())
     
-    # 위치 인자 처리
-    for i, arg in enumerate(args):
-        if i < len(parameters):
-            param_name = parameters[i]
-            request[param_name] = arg
+        # 위치 인자 처리
+        for i, arg in enumerate(args):
+            if i < len(parameters):
+                param_name = parameters[i]
+                request[param_name] = arg
     
-    # 키워드 인자 처리
-    for param_name, value in kwargs.items():
-        request[param_name] = value
+        # 키워드 인자 처리
+        for param_name, value in kwargs.items():
+            request[param_name] = value
+    except Exception as e:
+        logger.error(f"Error extracting request parameters: {str(e)}")
     
     return request
+
+def _parse_body(body):
+    """
+    요청 또는 응답 본문 파싱
+    """
+    if not body:
+        return {}
+        
+    if isinstance(body, bytes):
+        try:
+            body_str = body.decode('utf-8')
+            return json.loads(body_str)
+        except Exception:
+            return {'raw': str(body)}
+    elif isinstance(body, str):
+        try:
+            return json.loads(body)
+        except Exception:
+            return {'raw': body}
+    elif isinstance(body, dict):
+        return body
+    else:
+        return {'raw': str(body)}
+
+def _extract_response_data(response):
+    """
+    응답에서 데이터 추출
+    """
+    if not response:
+        return {}
+        
+    response_data = {}
+    
+    if hasattr(response, 'get'):
+        # Dict-like response
+        response_data = response
+    else:
+        # API 응답 객체
+        for key in ['body', 'response', 'responseBody', 'ResponseMetadata', 'contentType', 'generation']:
+            if hasattr(response, key):
+                value = getattr(response, key)
+                response_data[key] = value
+
+    # body가 있는 경우 파싱
+    if 'body' in response_data:
+        try:
+            if isinstance(response_data['body'], (bytes, bytearray)):
+                body_str = response_data['body'].decode('utf-8')
+                response_data['parsed_body'] = json.loads(body_str)
+            elif isinstance(response_data['body'], str):
+                response_data['parsed_body'] = json.loads(response_data['body'])
+        except Exception as e:
+            logger.debug(f"Could not parse response body: {str(e)}")
+    
+    return response_data
 
 def _handle_invoke_model_response(
     request: Dict[str, Any],
     response_info: Dict[str, Any],
     factory: BedrockCompletionEventDataFactory,
-    client: BedrockEventClient
+    client: Any
 ) -> None:
     """
     invoke_model 응답 처리
@@ -244,22 +434,80 @@ def _handle_invoke_model_response(
     response_error = response_info.get('response_error')
     response_time = response_info.get('duration', 0)
     
+    # 요청 본문 파싱
+    request_body = request.get('body', {})
+    if isinstance(request_body, (bytes, str)):
+        request_body = _parse_body(request_body)
+    
+    # 응답 데이터 추출
+    response_data = _extract_response_data(response) if response else {}
+    
     # 이벤트 데이터 생성
     event_data = factory.create_event_data({
-        'request': request,
-        'response_data': response,
+        'request': {
+            **request,
+            'parsed_body': request_body
+        },
+        'response_data': response_data,
         'response_time': response_time,
         'response_error': response_error
     })
     
-    # 이벤트 데이터 전송
-    client.send(event_data)
+    # 이벤트 전송
+    if event_data:
+        client.send(event_data)
+
+def _handle_invoke_model_stream_response(
+    request: Dict[str, Any],
+    response_info: Dict[str, Any],
+    factory: BedrockCompletionEventDataFactory,
+    client: Any
+) -> None:
+    """
+    invoke_model_with_response_stream 응답 처리
+    """
+    response = response_info.get('response')
+    response_error = response_info.get('response_error')
+    response_time = response_info.get('duration', 0)
+    is_stream_start = response_info.get('is_stream_start', False)
+    
+    # 요청 본문 파싱
+    request_body = request.get('body', {})
+    if isinstance(request_body, (bytes, str)):
+        request_body = _parse_body(request_body)
+    
+    # 응답 데이터 추출
+    response_data = {}
+    if response and (hasattr(response, 'get') or isinstance(response, dict)):
+        response_data = response if isinstance(response, dict) else dict(response)
+    
+    # 추가 메타 데이터
+    streaming_metadata = {
+        'is_streaming': True,
+        'stream_event_type': 'start' if is_stream_start else 'chunk'
+    }
+    
+    # 이벤트 데이터 생성
+    event_data = factory.create_event_data({
+        'request': {
+            **request,
+            'parsed_body': request_body,
+            **streaming_metadata
+        },
+        'response_data': response_data,
+        'response_time': response_time,
+        'response_error': response_error
+    })
+    
+    # 이벤트 전송
+    if event_data:
+        client.send(event_data)
 
 def _handle_converse_response(
     request: Dict[str, Any],
     response_info: Dict[str, Any],
     factory: BedrockChatCompletionEventDataFactory,
-    client: BedrockEventClient
+    client: Any
 ) -> None:
     """
     converse 응답 처리
@@ -268,38 +516,105 @@ def _handle_converse_response(
     response_error = response_info.get('response_error')
     response_time = response_info.get('duration', 0)
     
-    # 이벤트 데이터 리스트 생성
+    # 요청 본문 추출
+    request_messages = request.get('messages', [])
+    
+    # 응답 데이터 추출
+    response_data = _extract_response_data(response) if response else {}
+    
+    # 이벤트 데이터 생성
     event_data_list = factory.create_event_data_list({
         'request': request,
-        'response_data': response,
+        'response_data': response_data,
         'response_time': response_time,
         'response_error': response_error
     })
     
-    # 이벤트 데이터 전송
-    for event_data in event_data_list:
-        client.send(event_data)
+    # 이벤트 전송
+    if event_data_list:
+        for event_data in event_data_list:
+            client.send(event_data)
 
 def _handle_embedding_response(
     request: Dict[str, Any],
     response_info: Dict[str, Any],
     factory: BedrockEmbeddingEventDataFactory,
-    client: BedrockEventClient
+    client: Any
 ) -> None:
     """
-    embedding 응답 처리
+    create_embedding 응답 처리
     """
     response = response_info.get('response')
     response_error = response_info.get('response_error')
     response_time = response_info.get('duration', 0)
     
+    # 요청 본문 파싱
+    request_body = request.get('body', {})
+    if isinstance(request_body, (bytes, str)):
+        request_body = _parse_body(request_body)
+    
+    # 응답 데이터 추출
+    response_data = _extract_response_data(response) if response else {}
+    
     # 이벤트 데이터 생성
     event_data = factory.create_event_data({
-        'request': request,
-        'response_data': response,
+        'request': {
+            **request,
+            'parsed_body': request_body
+        },
+        'response_data': response_data,
         'response_time': response_time,
         'response_error': response_error
     })
     
-    # 이벤트 데이터 전송
-    client.send(event_data) 
+    # 이벤트 전송
+    if event_data:
+        client.send(event_data)
+
+def _handle_generate_with_model_response(
+    request: Dict[str, Any],
+    response_info: Dict[str, Any],
+    factory: BedrockCompletionEventDataFactory,
+    client: Any
+) -> None:
+    """
+    generate_with_model 응답 처리 (RAG API)
+    """
+    response = response_info.get('response')
+    response_error = response_info.get('response_error')
+    response_time = response_info.get('duration', 0)
+    
+    # 요청 정보 처리
+    processed_request = {
+        **request,
+        'parsed_body': request.get('inferenceConfig', {}),
+        'modelId': request.get('modelId'),
+        'api_type': 'rag'
+    }
+    
+    # 응답 데이터 추출 및 처리
+    response_data = {}
+    if response:
+        # generation 필드가 있는 경우 응답 텍스트로 사용
+        if hasattr(response, 'generation'):
+            response_data['generation'] = response.generation
+            
+        # citations이 있는 경우 추가
+        if hasattr(response, 'citations'):
+            response_data['citations'] = response.citations
+            
+        # 메타데이터 추가
+        if hasattr(response, 'ResponseMetadata'):
+            response_data['ResponseMetadata'] = response.ResponseMetadata
+    
+    # 이벤트 데이터 생성
+    event_data = factory.create_event_data({
+        'request': processed_request,
+        'response_data': response_data,
+        'response_time': response_time,
+        'response_error': response_error
+    })
+    
+    # 이벤트 전송
+    if event_data:
+        client.send(event_data) 

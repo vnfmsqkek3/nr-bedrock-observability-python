@@ -1,83 +1,134 @@
 import os
-import json
 import logging
-from typing import Dict, List, Optional, Any, Union
-import newrelic.agent
+import json
+import time
+from typing import Dict, Any, Optional, List, Union, Callable
+
+try:
+    import newrelic.agent
+    NEWRELIC_AVAILABLE = True
+except ImportError:
+    NEWRELIC_AVAILABLE = False
+
 from .event_types import EventData
 
 logger = logging.getLogger(__name__)
 
 class EventClientOptions:
     """
-    New Relic 이벤트 클라이언트에 대한 옵션
+    이벤트 클라이언트 옵션
     """
     def __init__(
         self,
-        application_name: str,
         new_relic_api_key: Optional[str] = None,
         host: Optional[str] = None,
-        port: Optional[int] = None
+        port: Optional[int] = None,
     ):
-        self.application_name = application_name
         self.new_relic_api_key = new_relic_api_key
         self.host = host
         self.port = port
 
 class BedrockEventClient:
     """
-    New Relic에 AWS Bedrock 이벤트 데이터를 전송하는 클라이언트
+    New Relic에 Bedrock 이벤트 데이터 전송하는 클라이언트
     """
-    def __init__(self, options: Union[EventClientOptions, Dict[str, Any]]):
-        if isinstance(options, dict):
-            if 'application_name' not in options:
-                raise ValueError("application_name is required")
-            self.options = EventClientOptions(
-                application_name=options['application_name'],
-                new_relic_api_key=options.get('new_relic_api_key'),
-                host=options.get('host'),
-                port=options.get('port')
-            )
-        else:
-            self.options = options
-            
-        # 환경 변수에서 API 키 가져오기
-        self.api_key = (
-            self.options.new_relic_api_key or 
-            os.environ.get('NEW_RELIC_LICENSE_KEY') or 
-            os.environ.get('NEW_RELIC_INSERT_KEY')
-        )
-        
-        if not self.api_key:
-            raise ValueError("New Relic API Key wasn't found. Please provide it in options or set environment variables.")
-            
-        self.host = self.options.host or os.environ.get('EVENT_CLIENT_HOST')
-        self.port = self.options.port
-        
-    def send(self, *event_data_list: EventData) -> None:
+    def __init__(self, api_key: str, host: Optional[str] = None, port: Optional[int] = None):
+        self.api_key = api_key
+        self.host = host
+        self.port = port
+        self.event_queue: List[Dict[str, Any]] = []
+        self._setup_newrelic_agent()
+
+    def _setup_newrelic_agent(self) -> None:
         """
-        New Relic에 이벤트 데이터 전송
+        뉴렐릭 에이전트 설정
         """
+        if not NEWRELIC_AVAILABLE:
+            logger.warning("New Relic Python Agent is not installed. Some functionality may be limited.")
+            return
+            
         try:
-            for event_data in event_data_list:
-                # New Relic 에이전트를 통해 이벤트 기록
-                event_dict = {
-                    'eventType': event_data.event_type,
-                    **event_data.attributes
-                }
+            # 에이전트 구성 업데이트 (필요한 경우)
+            if self.host:
+                newrelic.agent.global_settings().event_collector_host = self.host
+            if self.port:
+                newrelic.agent.global_settings().event_collector_port = self.port
+        except Exception as e:
+            logger.error(f"Failed to configure New Relic agent: {str(e)}")
+
+    def send(self, event_data: EventData) -> None:
+        """
+        이벤트 데이터를 New Relic에 전송
+        
+        :param event_data: 전송할 이벤트 데이터
+        """
+        if not event_data:
+            return
+            
+        try:
+            event_type = event_data.get('eventType')
+            attributes = event_data.get('attributes', {})
+            
+            if not event_type:
+                logger.error("Event type is required")
+                return
                 
-                # New Relic 에이전트에 사용자 지정 이벤트 기록
-                newrelic.agent.record_custom_event(
-                    event_data.event_type,
-                    event_data.attributes
-                )
-                
-                logger.debug(f"Sent event to New Relic: {json.dumps(event_dict)}")
-                
+            if NEWRELIC_AVAILABLE:
+                # New Relic Python Agent로 이벤트 직접 전송
+                newrelic.agent.record_custom_event(event_type, attributes)
+                logger.debug(f"Event sent to New Relic: {event_type}")
+            else:
+                # 에이전트 없이 사용 시 이벤트 대기열에 추가 (향후 구현)
+                self.event_queue.append({
+                    'eventType': event_type,
+                    'attributes': attributes,
+                    'timestamp': int(time.time() * 1000)
+                })
+                logger.debug(f"Event queued (New Relic agent not available): {event_type}")
         except Exception as e:
             logger.error(f"Error sending event to New Relic: {str(e)}")
 
-def create_event_client(options: Union[EventClientOptions, Dict[str, Any]]) -> BedrockEventClient:
+def create_event_client(
+    options: Union[EventClientOptions, Any] = None
+) -> BedrockEventClient:
     """
-    이벤트 클라이언트 생성
+    Bedrock 이벤트 클라이언트 생성
+    
+    :param options: 클라이언트 옵션
+    :return: Bedrock 이벤트 클라이언트
     """
-    return BedrockEventClient(options) 
+    # 환경 변수 확인
+    environment = {
+        'new_relic_api_key': os.environ.get('NEW_RELIC_LICENSE_KEY'),
+        'insert_key': os.environ.get('NEW_RELIC_INSERT_KEY'),
+        'host': os.environ.get('EVENT_CLIENT_HOST'),
+    }
+
+    # 옵션 처리
+    if isinstance(options, dict):
+        options_obj = EventClientOptions(
+            new_relic_api_key=options.get('new_relic_api_key'),
+            host=options.get('host'),
+            port=options.get('port')
+        )
+    elif hasattr(options, 'new_relic_api_key'):
+        options_obj = options
+    else:
+        options_obj = EventClientOptions()
+
+    # API 키 확인
+    api_key = (
+        options_obj.new_relic_api_key or
+        environment['new_relic_api_key'] or
+        environment['insert_key']
+    )
+    
+    if not api_key:
+        raise ValueError("New Relic API Key wasn't found")
+
+    # 클라이언트 생성 및 반환
+    return BedrockEventClient(
+        api_key=api_key,
+        host=options_obj.host or environment['host'],
+        port=options_obj.port
+    ) 

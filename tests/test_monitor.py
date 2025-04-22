@@ -1,12 +1,19 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import boto3
+import os
 
 import sys
-import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src import monitor_bedrock
+
+# 환경 변수로 설정 (코드에 직접 입력하지 않음)
+os.environ["AWS_ACCESS_KEY_ID"] = "YOUR_ACCESS_KEY"  # 실행 시 직접 입력하세요
+os.environ["AWS_SECRET_ACCESS_KEY"] = "YOUR_SECRET_KEY"  # 실행 시 직접 입력하세요
+os.environ["NEW_RELIC_LICENSE_KEY"] = "YOUR_NEW_RELIC_KEY"  # New Relic 키 설정
+
+# 또는 AWS 설정 파일 사용 (~/.aws/credentials)
 
 class TestMonitorBedrock:
     def test_monitor_bedrock_basic(self):
@@ -65,4 +72,16 @@ class TestMonitorBedrock:
             monitor_bedrock(mock_client, options)
             
         # Assert event client was created
-        mock_create_event_client.assert_called_once() 
+        mock_create_event_client.assert_called_once()
+
+# 테스트 실행
+bedrock_client = boto3.client('bedrock-runtime')
+monitored_client = monitor_bedrock(
+    bedrock_client=bedrock_client,
+    options={
+        'application_name': 'TestBedrockApp'
+    }
+)
+
+# 제공된 showcase.py 파일을 수정하지 말고 그대로 실행하세요:
+# python nr-bedrock-observability-python/tests/showcase.py 
