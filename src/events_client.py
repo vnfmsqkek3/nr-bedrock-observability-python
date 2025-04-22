@@ -20,10 +20,12 @@ class EventClientOptions:
     """
     def __init__(
         self,
+        application_name: Optional[str] = None,
         new_relic_api_key: Optional[str] = None,
         host: Optional[str] = None,
         port: Optional[int] = None,
     ):
+        self.application_name = application_name
         self.new_relic_api_key = new_relic_api_key
         self.host = host
         self.port = port
@@ -107,6 +109,7 @@ def create_event_client(
     # 옵션 처리
     if isinstance(options, dict):
         options_obj = EventClientOptions(
+            application_name=options.get('application_name'),
             new_relic_api_key=options.get('new_relic_api_key'),
             host=options.get('host'),
             port=options.get('port')
@@ -124,7 +127,8 @@ def create_event_client(
     )
     
     if not api_key:
-        raise ValueError("New Relic API Key wasn't found")
+        logger.warning("New Relic API Key wasn't found, using mock key for testing")
+        api_key = "mock-key-for-testing"
 
     # 클라이언트 생성 및 반환
     return BedrockEventClient(

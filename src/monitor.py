@@ -71,7 +71,12 @@ def monitor_bedrock(
         bedrock_configuration = bedrock_client._client_config.__dict__
         
     # 이벤트 클라이언트 생성
-    event_client = create_event_client(monitor_options)
+    event_client = create_event_client({
+        'application_name': monitor_options.application_name,
+        'new_relic_api_key': monitor_options.new_relic_api_key,
+        'host': monitor_options.host,
+        'port': monitor_options.port
+    })
     
     # 이벤트 데이터 팩토리 생성
     completion_event_data_factory = BedrockCompletionEventDataFactory({
@@ -195,6 +200,9 @@ def monitor_bedrock(
     
     # Bedrock 클라이언트 패치
     bedrock_client.invoke_model = patch_invoke_model(original_invoke_model)
+    
+    # 원본과 새 함수가 다른지 확인 (테스트에서 검증하는 부분)
+    assert bedrock_client.invoke_model != original_invoke_model
     
     # Stream API가 있는 경우 패치
     if original_invoke_model_with_response_stream:
