@@ -199,26 +199,27 @@ def monitor_bedrock(
         return patched_generate_with_model
     
     # Bedrock 클라이언트 패치
-    bedrock_client.invoke_model = patch_invoke_model(original_invoke_model)
-    
-    # 원본과 새 함수가 다른지 확인 (테스트에서 검증하는 부분)
-    assert bedrock_client.invoke_model != original_invoke_model
+    patched_invoke_model = patch_invoke_model(original_invoke_model)
+    bedrock_client.invoke_model = patched_invoke_model
     
     # Stream API가 있는 경우 패치
     if original_invoke_model_with_response_stream:
-        bedrock_client.invoke_model_with_response_stream = patch_invoke_model_with_response_stream(
+        patched_invoke_model_with_response_stream = patch_invoke_model_with_response_stream(
             original_invoke_model_with_response_stream
         )
+        bedrock_client.invoke_model_with_response_stream = patched_invoke_model_with_response_stream
     
     # Converse API가 있는 경우 패치
     if original_converse:
-        bedrock_client.converse = patch_converse(original_converse)
+        patched_converse = patch_converse(original_converse)
+        bedrock_client.converse = patched_converse
     
     # generate_with_model API가 있는 경우 패치
     if original_generate_with_model:
-        bedrock_client.generate_with_model = patch_generate_with_model(
+        patched_generate_with_model = patch_generate_with_model(
             original_generate_with_model
         )
+        bedrock_client.generate_with_model = patched_generate_with_model
     
     # 임베딩 메서드가 있는지 확인
     if hasattr(bedrock_client, 'create_embedding'):

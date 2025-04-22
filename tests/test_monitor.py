@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import boto3
 import os
+import copy
 
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -21,9 +22,12 @@ class TestMonitorBedrock:
         mock_client = MagicMock()
         mock_client._client_config = MagicMock()
         
-        # Set up basic attributes for testing
-        mock_client.invoke_model = MagicMock()
-        mock_client.converse = MagicMock()
+        # Set up basic attributes for testing and store original references
+        original_invoke_model = MagicMock()
+        original_converse = MagicMock()
+        
+        mock_client.invoke_model = original_invoke_model
+        mock_client.converse = original_converse
         
         # Configure options
         options = {
@@ -37,8 +41,8 @@ class TestMonitorBedrock:
             patched_client = monitor_bedrock(mock_client, options)
             
             # Assert that the client has been patched (references should be different)
-            assert patched_client.invoke_model != mock_client.invoke_model
-            assert patched_client.converse != mock_client.converse
+            assert patched_client.invoke_model is not original_invoke_model
+            assert patched_client.converse is not original_converse
             
             # Assert that the client itself was returned (object identity)
             assert patched_client is mock_client
@@ -55,7 +59,7 @@ class TestMonitorBedrock:
         with pytest.raises(ValueError, match="Bedrock client is missing"):
             monitor_bedrock(None, {'application_name': 'TestApp'})
             
-    @patch('src.events_client.create_event_client')
+    @patch('src.monitor.create_event_client')
     def test_monitor_bedrock_creates_event_client(self, mock_create_event_client):
         # Create mock objects
         mock_client = MagicMock()
@@ -74,14 +78,15 @@ class TestMonitorBedrock:
         # Assert event client was created
         mock_create_event_client.assert_called_once()
 
-# 테스트 실행
-bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
-monitored_client = monitor_bedrock(
-    bedrock_client=bedrock_client,
-    options={
-        'application_name': 'TestBedrockApp'
-    }
-)
+# 테스트 실행 (CI에서만 수행)
+if 'CI' in os.environ:
+    bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
+    monitored_client = monitor_bedrock(
+        bedrock_client=bedrock_client,
+        options={
+            'application_name': 'TestBedrockApp'
+        }
+    )
 
 # 제공된 showcase.py 파일을 수정하지 말고 그대로 실행하세요:
 # python nr-bedrock-observability-python/tests/showcase.py 
