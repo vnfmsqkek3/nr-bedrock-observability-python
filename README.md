@@ -14,6 +14,7 @@ AWS Bedrock API 호출을 위한 New Relic 관찰성 라이브러리입니다. �
 - `CommonSummaryAttributes` 클래스 추가로 이벤트 데이터 표준화
 - AWS 리전 지정 필요성 명시
 - API 키가 없는 환경에서도 테스트용 키로 실행 가능
+- New Relic 트랜잭션 관리 기능 추가로 이벤트 로깅 안정성 향상
 - README 문서 개선 및 예제 코드 업데이트
 
 ## 설치
@@ -148,7 +149,7 @@ import json
 from nr_bedrock_observability import monitor_bedrock
 
 # Bedrock 클라이언트 생성
-bedrock = boto3.client('bedrock-runtime')
+bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
 
 # 모니터링 설정
 monitor_bedrock(bedrock, {'application_name': 'MyClaudeApp'})
@@ -158,21 +159,28 @@ response = bedrock.invoke_model(
     modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
     body=json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 1000,
+        "max_tokens": 300,
         "messages": [
             {
                 "role": "user",
-                "content": "인공지능의 최신 발전 동향을 설명해주세요."
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "한국의 역사에 대해 간략하게 설명해줘."
+                    }
+                ]
             }
-        ]
+        ],
+        "temperature": 0.7
     })
 )
 
 # 응답 처리
 response_body = json.loads(response['body'].read().decode('utf-8'))
-for content_item in response_body['content']:
-    if content_item['type'] == 'text':
-        print(content_item['text'])
+if "content" in response_body and len(response_body["content"]) > 0:
+    for content_item in response_body["content"]:
+        if content_item["type"] == "text":
+            print(content_item["text"])
 ```
 
 ### 스트리밍 API 사용
@@ -183,28 +191,60 @@ import json
 from nr_bedrock_observability import monitor_bedrock
 
 # Bedrock 클라이언트 생성
-bedrock = boto3.client('bedrock-runtime')
+bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
 
 # 모니터링 설정
 monitor_bedrock(bedrock, {'application_name': 'MyStreamingApp'})
 
-# 스트리밍 응답으로 Titan 모델 호출
+# 스트리밍 응답으로 Claude 3.5 Sonnet 모델 호출
 stream_response = bedrock.invoke_model_with_response_stream(
-    modelId='amazon.titan-text-express-v1',
+    modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
     body=json.dumps({
-        'inputText': 'Write a short poem about clouds.',
-        'textGenerationConfig': {
-            'maxTokenCount': 512,
-            'temperature': 0.7
-        }
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 300,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "구름에 대한 짧은 시를 써줘."
+                    }
+                ]
+            }
+        ],
+        "temperature": 0.7
     })
 )
 
 # 스트리밍 응답 처리
+full_response = ""
 for event in stream_response['body']:
-    chunk = json.loads(event['chunk']['bytes'].decode())
-    if 'outputText' in chunk:
-        print(chunk['outputText'], end='', flush=True)
+    chunk_bytes = event['chunk']['bytes']
+    chunk_str = chunk_bytes.decode('utf-8')
+    
+    try:
+        chunk = json.loads(chunk_str)
+        
+        # 다양한 응답 형식 처리
+        if 'content' in chunk and len(chunk['content']) > 0:
+            for content_item in chunk['content']:
+                if content_item.get('type') == 'text':
+                    chunk_text = content_item.get('text', '')
+                    full_response += chunk_text
+                    print(chunk_text, end='', flush=True)
+        elif 'completion' in chunk:
+            chunk_text = chunk['completion']
+            full_response += chunk_text
+            print(chunk_text, end='', flush=True)
+        elif 'outputText' in chunk:
+            chunk_text = chunk['outputText']
+            full_response += chunk_text
+            print(chunk_text, end='', flush=True)
+    except json.JSONDecodeError:
+        print(f"JSON 파싱 오류: {chunk_str}")
+
+print("\n\n완료됨!")
 ```
 
 ### RAG API 사용
@@ -294,6 +334,133 @@ monitor_bedrock(bedrock_client, {
     'application_name': 'HighVolumeApp',
     'disable_streaming_events': True,  # 스트리밍 이벤트 비활성화
 })
+```
+
+## New Relic 트랜잭션 관리
+
+이벤트가 제대로 기록되지 않는 문제가 발생하는 경우, 명시적인 트랜잭션 관리를 사용할 수 있습니다. 트랜잭션은 New Relic에서 이벤트를 올바르게 기록하기 위해 필요합니다.
+
+```python
+import newrelic.agent
+from nr_bedrock_observability import monitor_bedrock
+
+# New Relic 애플리케이션 객체 얻기
+nr_application = newrelic.agent.application()
+
+# 트랜잭션 시작 함수
+def start_transaction(name):
+    transaction = None
+    if nr_application:
+        print(f"New Relic 트랜잭션 시작: {name}")
+        transaction = newrelic.agent.BackgroundTask(nr_application, name=f"Python/{name}")
+        transaction.__enter__()
+    return transaction
+
+# 트랜잭션 종료 함수
+def end_transaction(transaction):
+    if transaction:
+        print("New Relic 트랜잭션 종료")
+        transaction.__exit__(None, None, None)
+
+# 메인 함수 예시
+def main():
+    # 트랜잭션 시작
+    transaction = start_transaction("main")
+    
+    try:
+        # Bedrock 클라이언트 초기화
+        bedrock_client = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
+        
+        # New Relic 모니터링 설정 - 애플리케이션 객체 직접 전달
+        monitor_options = {
+            'application_name': 'Bedrock-Test-App',
+            'new_relic_api_key': 'YOUR_LICENSE_KEY',
+            'application': nr_application  # 애플리케이션 객체 직접 전달
+        }
+        
+        monitored_client = monitor_bedrock(bedrock_client, monitor_options)
+        
+        # API 호출 및 데이터 처리
+        # ...
+    
+    finally:
+        # 트랜잭션 종료
+        end_transaction(transaction)
+
+if __name__ == "__main__":
+    main()
+```
+
+### 스트리밍 API와 트랜잭션 관리
+
+스트리밍 API를 사용할 때도 트랜잭션 관리가 중요합니다:
+
+```python
+def test_streaming_completion():
+    # 트랜잭션 시작
+    transaction = start_transaction("test_streaming_completion")
+    
+    try:
+        # API 호출
+        stream_response = monitored_client.invoke_model_with_response_stream(
+            modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 300,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "구름에 대한 짧은 시를 써줘."
+                            }
+                        ]
+                    }
+                ],
+                "temperature": 0.7
+            })
+        )
+        
+        # 스트리밍 청크 처리
+        for event in stream_response['body']:
+            chunk_bytes = event['chunk']['bytes']
+            chunk_str = chunk_bytes.decode('utf-8')
+            # 청크 처리 로직
+    
+    finally:
+        # 트랜잭션 종료
+        end_transaction(transaction)
+```
+
+## 이벤트 로깅 최적화
+
+이벤트 로깅이 제대로 되지 않는 경우, 다음과 같이 이벤트 클라이언트를 수동으로 설정할 수 있습니다:
+
+```python
+from nr_bedrock_observability.events_client import BedrockEventClient
+
+# 이벤트 클라이언트 패치
+if nr_application:
+    # 원본 send 메서드 저장
+    original_send = BedrockEventClient.send
+    
+    # 새로운 send 메서드
+    def patched_send(self, event_data):
+        if nr_application and event_data:
+            event_type = event_data.get('eventType')
+            attributes = event_data.get('attributes', {})
+            
+            if event_type:
+                # 트랜잭션 내에서 직접 이벤트 기록
+                with newrelic.agent.BackgroundTask(nr_application, name=f"DirectEvent/{event_type}"):
+                    newrelic.agent.record_custom_event(event_type, attributes, application=nr_application)
+        
+        # 원본 함수도 호출
+        return original_send(self, event_data)
+    
+    # send 메서드 패치
+    BedrockEventClient.send = patched_send
 ```
 
 ## 개발
