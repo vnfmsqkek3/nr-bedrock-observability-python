@@ -69,6 +69,40 @@ class ChatCompletionSummaryAttributes(TypedDict, total=False):
     ingest_source: Optional[str]
     rate_limit_exceeded: Optional[bool]
 
+class CommonSummaryAttributes:
+    """
+    공통 요약 속성
+    """
+    def __init__(
+        self,
+        id: str,
+        application_name: str,
+        request_model: Optional[str] = None,
+        response_model: Optional[str] = None,
+        response_time: int = 0,
+        api_key_last_four_digits: Optional[str] = None,
+        user_id: Optional[str] = None,
+        error_message: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_code: Optional[str] = None,
+    ):
+        self.id = id
+        self.application_name = application_name
+        self.request_model = request_model
+        self.response_model = response_model
+        self.response_time = response_time
+        self.api_key_last_four_digits = api_key_last_four_digits
+        self.user_id = user_id
+        self.error_message = error_message
+        self.error_type = error_type
+        self.error_code = error_code
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        속성을 딕셔너리로 변환
+        """
+        return {k: v for k, v in self.__dict__.items() if v is not None}
+
 class EmbeddingAttributes(TypedDict, total=False):
     """
     임베딩 속성
