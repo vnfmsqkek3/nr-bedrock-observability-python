@@ -358,18 +358,18 @@ def _extract_request_from_args_kwargs(args, kwargs, original_func):
     
     # 함수 파라미터 목록 가져오기
     try:
-        signature = inspect.signature(original_func)
-        parameters = list(signature.parameters.keys())
+    signature = inspect.signature(original_func)
+    parameters = list(signature.parameters.keys())
     
-        # 위치 인자 처리
-        for i, arg in enumerate(args):
-            if i < len(parameters):
-                param_name = parameters[i]
-                request[param_name] = arg
+    # 위치 인자 처리
+    for i, arg in enumerate(args):
+        if i < len(parameters):
+            param_name = parameters[i]
+            request[param_name] = arg
     
-        # 키워드 인자 처리
-        for param_name, value in kwargs.items():
-            request[param_name] = value
+    # 키워드 인자 처리
+    for param_name, value in kwargs.items():
+        request[param_name] = value
     except Exception as e:
         logger.error(f"Error extracting request parameters: {str(e)}")
     
@@ -510,7 +510,7 @@ def _handle_invoke_model_stream_response(
     
     # 이벤트 전송
     if event_data:
-        client.send(event_data)
+    client.send(event_data)
 
 def _handle_converse_response(
     request: Dict[str, Any],
@@ -541,8 +541,8 @@ def _handle_converse_response(
     
     # 이벤트 전송
     if event_data_list:
-        for event_data in event_data_list:
-            client.send(event_data)
+    for event_data in event_data_list:
+        client.send(event_data)
 
 def _handle_embedding_response(
     request: Dict[str, Any],
@@ -626,4 +626,4 @@ def _handle_generate_with_model_response(
     
     # 이벤트 전송
     if event_data:
-        client.send(event_data) 
+    client.send(event_data) 

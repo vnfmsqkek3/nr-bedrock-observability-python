@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+import io  # 바이트 입출력을 위한 io 모듈
 from typing import Dict, Any, Optional, Union, List
 
 from ..event_types import EventType, EventData, EventAttributes, EmbeddingAttributes
@@ -86,8 +87,31 @@ class BedrockEmbeddingEventDataFactory:
         if response_data and 'body' in response_data:
             try:
                 if hasattr(response_data['body'], 'read'):
-                    # StreamingBody 객체인 경우
+                    # StreamingBody 객체인 경우 - 복제하여 사용
+                    position = 0
+                    if hasattr(response_data['body'], 'tell'):
+                        try:
+                            position = response_data['body'].tell()  # 현재 위치 저장
+                        except:
+                            pass
+                    
+                    # 현재 위치에서 내용 읽기
                     body_content = response_data['body'].read()
+                    
+                    # 원본 위치 복원 (가능한 경우)
+                    if hasattr(response_data['body'], 'seek'):
+                        try:
+                            response_data['body'].seek(position)  # 원래 위치로 되돌리기
+                        except:
+                            # 위치 복원 실패 시 새 객체로 대체
+                            if isinstance(body_content, bytes):
+                                response_data['body'] = io.BytesIO(body_content)
+                    else:
+                        # seek이 없는 경우 새 객체로 대체
+                        if isinstance(body_content, bytes):
+                            response_data['body'] = io.BytesIO(body_content)
+                    
+                    # 파싱
                     response_body = json.loads(body_content)
                 elif isinstance(response_data['body'], str):
                     response_body = json.loads(response_data['body'])

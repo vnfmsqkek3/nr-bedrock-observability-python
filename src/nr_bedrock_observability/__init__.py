@@ -5,8 +5,8 @@ New Relic AWS Bedrock 모니터링 라이브러리
 # 모듈을 직접 import하면 monitor_bedrock 함수 사용 가능
 from .monitor import monitor_bedrock
 
-# 버전 정보
-__version__ = '0.3.2'
+# 패키지 버전 정보
+__version__ = "0.3.3"
 
 # 공개 API
 __all__ = ['monitor_bedrock']

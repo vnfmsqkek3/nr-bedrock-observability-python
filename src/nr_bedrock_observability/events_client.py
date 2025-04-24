@@ -93,7 +93,7 @@ class BedrockEventClient:
                     logger.error(f"Error recording event with transaction: {str(e)}")
                     # 에러 발생 시 기본 방식으로 다시 시도
                     try:
-                        newrelic.agent.record_custom_event(event_type, attributes)
+                newrelic.agent.record_custom_event(event_type, attributes)
                         logger.debug(f"Event sent to New Relic using fallback: {event_type}")
                     except Exception as e2:
                         logger.error(f"Error recording event using fallback: {str(e2)}")

@@ -31,7 +31,7 @@ class BedrockCompletionEventDataFactory:
         else:
             self.application_name = options.application_name
             self.bedrock_configuration = options.bedrock_configuration
-            
+        
     def create_event_data(self, options: Dict[str, Any]) -> Optional[EventData]:
         """
         Bedrock invoke_model 호출에 대한 이벤트 데이터 생성
@@ -183,7 +183,7 @@ class BedrockCompletionEventDataFactory:
                     content = body.read()
                     if isinstance(content, bytes):
                         return json.loads(content.decode('utf-8'))
-                    else:
+                else:
                         return json.loads(content)
                 elif isinstance(body, str):
                     return json.loads(body)
@@ -203,7 +203,7 @@ class BedrockCompletionEventDataFactory:
         # RAG API 응답 처리
         if is_rag and 'generation' in response_body:
             return response_body['generation']
-            
+        
         # Amazon Titan 모델
         if 'amazon.titan' in model_id:
             # Titan V2 모델

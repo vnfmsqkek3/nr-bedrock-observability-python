@@ -5,7 +5,7 @@ import time
 from typing import Dict, Any, Optional, List, Union, Callable
 
 try:
-    import newrelic.agent
+import newrelic.agent
     NEWRELIC_AVAILABLE = True
 except ImportError:
     NEWRELIC_AVAILABLE = False

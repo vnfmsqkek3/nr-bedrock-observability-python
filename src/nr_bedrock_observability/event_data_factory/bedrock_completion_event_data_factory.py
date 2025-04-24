@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+import io  # 바이트 입출력을 위한 io 모듈
 from typing import Dict, Any, Optional, Union
 import time
 
@@ -179,8 +180,31 @@ class BedrockCompletionEventDataFactory:
                 
             try:
                 if hasattr(body, 'read'):
-                    # StreamingBody 객체인 경우
+                    # StreamingBody 객체인 경우 - 복제하여 사용
+                    position = 0
+                    if hasattr(body, 'tell'):
+                        try:
+                            position = body.tell()  # 현재 위치 저장
+                        except:
+                            pass
+                    
+                    # 현재 위치에서 내용 읽기
                     content = body.read()
+                    
+                    # 원본 위치 복원 (가능한 경우)
+                    if hasattr(body, 'seek'):
+                        try:
+                            body.seek(position)  # 원래 위치로 되돌리기
+                        except:
+                            # 위치 복원 실패 시 새 객체로 대체
+                            if isinstance(content, bytes):
+                                response_data['body'] = io.BytesIO(content)
+                    else:
+                        # seek이 없는 경우 새 객체로 대체
+                        if isinstance(content, bytes):
+                            response_data['body'] = io.BytesIO(content)
+                    
+                    # 읽은 내용 파싱
                     if isinstance(content, bytes):
                         return json.loads(content.decode('utf-8'))
                     else:

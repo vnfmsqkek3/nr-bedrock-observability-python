@@ -1,5 +1,6 @@
 import time
 import logging
+import io  # 추가: 바이트 입출력을 위한 io 모듈
 from typing import Dict, Any, Optional, Union, Callable, TypeVar, cast, List
 import inspect
 import json
@@ -319,11 +320,31 @@ def monitor_response(
     try:
         response = call()
         try:
-            on_response({
-                'response': response,
-                'response_error': None,
-                'duration': int((time.time() - start_time) * 1000)  # 밀리초 단위
-            })
+            # 응답에 StreamingBody가 있는 경우 복제
+            if response and isinstance(response, dict) and 'body' in response and hasattr(response['body'], 'read'):
+                logger.debug("StreamingBody 있음, 복제 중...")
+                copy_for_monitoring, original_restored = _copy_streaming_body(response['body'])
+                
+                # 복제본은 모니터링용, 원본은 사용자에게 반환
+                monitoring_response = response.copy()
+                monitoring_response['body'] = copy_for_monitoring
+                
+                # 원본 응답 복원
+                response['body'] = original_restored
+                
+                # 모니터링 응답을 사용하여 이벤트 처리
+                on_response({
+                    'response': monitoring_response,
+                    'response_error': None,
+                    'duration': int((time.time() - start_time) * 1000)  # 밀리초 단위
+                })
+            else:
+                # 일반 응답 처리
+                on_response({
+                    'response': response,
+                    'response_error': None,
+                    'duration': int((time.time() - start_time) * 1000)  # 밀리초 단위
+                })
         except Exception as e:
             logger.error(f"Error processing response: {str(e)}")
             
@@ -466,9 +487,18 @@ def _extract_response_data(response):
                 response_data[key] = value
 
     # body가 있는 경우 파싱
+    # 이미 _copy_streaming_body에 의해 복제된 경우 read 가능
     if 'body' in response_data:
         try:
-            if isinstance(response_data['body'], (bytes, bytearray)):
+            if hasattr(response_data['body'], 'read'):
+                # 이미 복제된 StreamingBody 객체 사용
+                body_content = response_data['body'].read()
+                if isinstance(body_content, bytes):
+                    body_str = body_content.decode('utf-8')
+                    response_data['parsed_body'] = json.loads(body_str)
+                else:
+                    response_data['parsed_body'] = json.loads(body_content)
+            elif isinstance(response_data['body'], (bytes, bytearray)):
                 body_str = response_data['body'].decode('utf-8')
                 response_data['parsed_body'] = json.loads(body_str)
             elif isinstance(response_data['body'], str):
@@ -724,4 +754,29 @@ def _handle_generate_with_model_response(
     
     # 이벤트 전송
     if event_data:
-        client.send(event_data) 
+        client.send(event_data)
+
+def _copy_streaming_body(body):
+    """
+    StreamingBody 객체를 복제하여 원본을 보존
+    
+    :param body: StreamingBody 객체 또는 다른 응답 본문
+    :return: (복제본, 원본) 튜플
+    """
+    if not body or not hasattr(body, 'read'):
+        return None, body
+        
+    try:
+        # 원본 내용 읽기
+        content = body.read()
+        
+        # 복제본 생성 (모니터링용)
+        copy_for_monitoring = io.BytesIO(content)
+        
+        # 원본 재생성 (사용자에게 반환)
+        original_restored = io.BytesIO(content)
+        
+        return copy_for_monitoring, original_restored
+    except Exception as e:
+        logger.error(f"StreamingBody 복제 중 오류: {str(e)}")
+        return None, body 
