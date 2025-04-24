@@ -49,4 +49,4 @@ jobs:
           print_hash: true
           packages_dir: dist/
           verify_metadata: false
-          project_name: nr-bedrock-observability 
+          project_name: newrelic-bedrock-observability-python 
