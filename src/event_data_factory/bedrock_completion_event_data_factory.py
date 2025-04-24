@@ -149,7 +149,14 @@ class BedrockCompletionEventDataFactory:
                 return body
                 
             try:
-                if isinstance(body, str):
+                if hasattr(body, 'read'):
+                    # StreamingBody 객체인 경우
+                    content = body.read()
+                    if isinstance(content, bytes):
+                        return json.loads(content.decode('utf-8'))
+                    else:
+                        return json.loads(content)
+                elif isinstance(body, str):
                     return json.loads(body)
                 elif isinstance(body, bytes):
                     return json.loads(body.decode('utf-8'))
@@ -183,7 +190,7 @@ class BedrockCompletionEventDataFactory:
                     content = body.read()
                     if isinstance(content, bytes):
                         return json.loads(content.decode('utf-8'))
-                else:
+                    else:
                         return json.loads(content)
                 elif isinstance(body, str):
                     return json.loads(body)
