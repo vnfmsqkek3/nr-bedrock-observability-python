@@ -6,7 +6,7 @@ New Relic AWS Bedrock 모니터링 라이브러리
 from .monitor import monitor_bedrock
 
 # 패키지 버전 정보
-__version__ = "0.3.3"
+__version__ = "1.0.3"
 
 # 공개 API
 __all__ = ['monitor_bedrock']

@@ -4,7 +4,27 @@
 
 AWS Bedrock API 호출을 위한 New Relic 관찰성 라이브러리입니다. 이 라이브러리를 사용하면 AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전송할 수 있습니다.
 
-## 최신 업데이트 (v0.3.3)
+## 최신 업데이트 (v1.0.3)
+
+- Claude 3.5 Sonnet v2 최신 버전(anthropic.claude-3-5-sonnet-20241022-v2:0) 모델 지원 강화
+- 내부 모델 맵핑 테이블의 일관성 개선 
+- 모든 모듈에서 신규 모델 ID 인식 가능하도록 업데이트
+
+## 이전 업데이트 (v1.0.2)
+
+- Claude 3.5 Sonnet 최신 버전(anthropic.claude-3-5-sonnet-20241022-v2:0) 지원 추가
+- 모델 ID 추적 및 인식 기능 개선
+- 내부 모델 매핑 테이블 업데이트
+
+## 이전 업데이트 (v1.0.1)
+
+- 안정성 강화 및 내부 오류 처리 개선
+- Streaming 응답을 처리한 후에도 응답 본문을 보존 가능하도록 구조 변경
+- `StreamingBody` 처리 시 `BytesIO` 활용하여 이중 소비 방지
+- New Relic 커스텀 이벤트 전송 성능 개선
+- `generate_with_model()` 등 신규 Bedrock API 지원 강화
+
+## 이전 업데이트 (v0.3.3)
 
 - 응답 데이터를 소비하지 않는 기능 추가: StreamingBody 객체를 복제하여 원본 보존
 - io.BytesIO를 사용한 응답 스트림 복사 구현
@@ -24,10 +44,10 @@ AWS Bedrock API 호출을 위한 New Relic 관찰성 라이브러리입니다. �
 
 ## 설치
 
-PyPI에서 패키지를 설치합니다:
+Test PyPI에서 패키지를 설치합니다:
 
 ```bash
-pip install nr-bedrock-observability
+pip install -i https://test.pypi.org/simple/ nr-bedrock-observability
 ```
 
 ## 시작하기
