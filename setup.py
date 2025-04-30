@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nr-bedrock-observability",
-    version="1.0.3",
+    version="1.1.0",
     description="New Relic observability for AWS Bedrock",
     author="New Relic",
     author_email="opensource@newrelic.com",

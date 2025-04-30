@@ -68,6 +68,9 @@ class ChatCompletionSummaryAttributes(TypedDict, total=False):
     error_request_id: Optional[str]
     ingest_source: Optional[str]
     rate_limit_exceeded: Optional[bool]
+    feedback: Optional[str]  # 'positive', 'negative', 'neutral'
+    sentiment: Optional[float]  # -1.0 to 1.0
+    feedback_message: Optional[str]
 
 class CommonSummaryAttributes:
     """
@@ -156,6 +159,9 @@ class CompletionAttributes(TypedDict, total=False):
     ingest_source: Optional[str]
     rate_limit_exceeded: Optional[bool]
     is_streaming: Optional[bool]
+    feedback: Optional[str]  # 'positive', 'negative', 'neutral'
+    sentiment: Optional[float]  # -1.0 to 1.0
+    feedback_message: Optional[str]
 
 class BedrockModelMapping:
     """

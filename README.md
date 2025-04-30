@@ -4,11 +4,21 @@
 
 AWS Bedrock API 호출을 위한 New Relic 관찰성 라이브러리입니다. 이 라이브러리를 사용하면 AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전송할 수 있습니다.
 
-## 최신 업데이트 (v1.0.3)
+## 최신 업데이트 (v1.1.0)
+
+- 사용자 피드백 수집 기능 추가
+  - 피드백 (positive, negative, neutral)
+  - 감정 점수 (-1.0 ~ 1.0)
+  - 피드백 메시지
+- 피드백 콜백 함수를 통한 사용자 정의 피드백 수집 지원
+- New Relic 이벤트에 피드백 데이터 자동 포함
+
+## 이전 업데이트 (v1.0.3)
 
 - Claude 3.5 Sonnet v2 최신 버전(anthropic.claude-3-5-sonnet-20241022-v2:0) 모델 지원 강화
 - 내부 모델 맵핑 테이블의 일관성 개선 
 - 모든 모듈에서 신규 모델 ID 인식 가능하도록 업데이트
+- RAG 워크플로우 트레이싱 샘플 코드 추가: 사용자 질문 → OpenSearch 검색 → Bedrock LLM 응답을 하나의 트레이스로 연결
 
 ## 이전 업데이트 (v1.0.2)
 
@@ -392,676 +402,80 @@ if hasattr(response, 'citations') and response.citations:
 - 속도 제한 (Rate Limit) 발생 여부
 - AWS 리전 정보
 
-## 고급 활용 예제
+## 통합 RAG 워크플로우 트레이싱
 
-### 다중 요청 이벤트 구분 및 추적
+이 라이브러리는 분산 트레이싱을 활용하여 복잡한 Retrieval-Augmented Generation(RAG) 워크플로우를 하나의 트레이스로 연결할 수 있습니다. 이를 통해 사용자의 질문부터 검색, 그리고 최종 응답까지의 전체 흐름을 모니터링할 수 있습니다.
 
-여러 종류의 요청을 구분하여 추적하려면 각 이벤트에 고유 식별자와 메타데이터를 추가하세요:
+### RAG 워크플로우 트레이싱 예제
+
+다음 예제는 OpenSearch 검색과 AWS Bedrock LLM 응답 생성을 하나의 트레이스로 연결합니다:
 
 ```python
+import newrelic.agent
 import uuid
 import boto3
-import json
-import time
-from nr_bedrock_observability import monitor_bedrock
-import newrelic.agent
-
-# New Relic 애플리케이션 객체 얻기
-nr_application = newrelic.agent.application()
-
-# Bedrock 클라이언트 생성
-bedrock_client = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
-
-# 모니터링 설정
-monitored_client = monitor_bedrock(bedrock_client, {
-    'application_name': 'BedfordAdvancedDemo',
-    'new_relic_api_key': 'YOUR_LICENSE_KEY',
-    'application': nr_application
-})
-
-# 첫 번째 요청 (한국 역사 질문)
-def make_history_request():
-    # 고유 이벤트 ID 생성
-    event_id = str(uuid.uuid4())
-    
-    # 요청 전 이벤트 기록
-    newrelic.agent.record_custom_event(
-        'PreRequestEvent', 
-        {
-            'event_id': event_id,
-            'request_type': 'korea_history',
-            'timestamp': time.time()
-        },
-        application=nr_application
-    )
-    
-    # Claude 3.5 Sonnet 모델 요청
-    response = monitored_client.invoke_model(
-        modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 300,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "한국의 역사에 대해 간략하게 설명해줘."
-                        }
-                    ]
-                }
-            ],
-            "temperature": 0.7
-        })
-    )
-    
-    # 응답 처리
-    raw_response = response.get("body").read()
-    response_body = json.loads(raw_response.decode("utf-8"))
-    response_content = ""
-    
-    if "content" in response_body and len(response_body["content"]) > 0:
-        for content_item in response_body["content"]:
-            if content_item.get("type") == "text":
-                response_content += content_item.get("text", "")
-    
-    # 응답 후 추가 이벤트 기록
-    newrelic.agent.record_custom_event(
-        'KoreaHistoryCompletion', 
-        {
-            'event_id': event_id,
-            'input_text': "한국의 역사에 대해 간략하게 설명해줘.",
-            'output_text': response_content[:500],
-            'model': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-            'prompt_type': 'korea_history',
-            'request_id': response.get('ResponseMetadata', {}).get('RequestId', ''),
-            'timestamp': time.time()
-        },
-        application=nr_application
-    )
-    
-    return response_content
-
-# 두 번째 요청 (인사말)
-def make_greeting_request():
-    # 고유 이벤트 ID 생성
-    event_id = str(uuid.uuid4())
-    
-    # 스트리밍 응답으로 Claude 3.5 Sonnet 모델 호출
-    stream_response = monitored_client.invoke_model_with_response_stream(
-        modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 300,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "안녕?잘부탁해!."
-                        }
-                    ]
-                }
-            ],
-            "temperature": 0.7
-        })
-    )
-    
-    # 스트리밍 응답 처리
-    full_response = ""
-    for event in stream_response['body']:
-        chunk_bytes = event['chunk']['bytes']
-        chunk_str = chunk_bytes.decode('utf-8')
-        
-        try:
-            chunk = json.loads(chunk_str)
-            
-            # 다양한 응답 형식 처리
-            chunk_text = ""
-            if 'content' in chunk and isinstance(chunk['content'], list):
-                for content_item in chunk['content']:
-                    if content_item.get('type') == 'text':
-                        chunk_text = content_item.get('text', '')
-                        full_response += chunk_text
-                        print(chunk_text, end='', flush=True)
-            elif 'completion' in chunk:
-                chunk_text = chunk['completion']
-                full_response += chunk_text
-                print(chunk_text, end='', flush=True)
-            elif 'delta' in chunk and 'text' in chunk['delta']:
-                chunk_text = chunk['delta']['text']
-                full_response += chunk_text
-                print(chunk_text, end='', flush=True)
-            
-            # 각 청크마다 이벤트 기록 (선택 사항)
-            if chunk_text and nr_application:
-                newrelic.agent.record_custom_event(
-                    'StreamChunk', 
-                    {
-                        'parent_id': event_id,
-                        'chunk_text': chunk_text[:100],
-                        'timestamp': time.time()
-                    },
-                    application=nr_application
-                )
-        except json.JSONDecodeError:
-            pass
-    
-    # 스트리밍 완료 후 이벤트 기록
-    newrelic.agent.record_custom_event(
-        'GreetingCompletion', 
-        {
-            'event_id': event_id,
-            'input_text': "안녕?잘부탁해!.",
-            'output_text': full_response[:500],
-            'model': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-            'prompt_type': 'greeting',
-            'timestamp': time.time()
-        },
-        application=nr_application
-    )
-    
-    return full_response
-
-# 실행 함수
-def run_demo():
-    # 트랜잭션 시작
-    with newrelic.agent.BackgroundTask(nr_application, name="BedrokAdvancedDemo"):
-        print("1. 한국 역사 질문 시작...")
-        history_response = make_history_request()
-        print(f"\n응답 길이: {len(history_response)} 자")
-        
-        # 첫 번째와 두 번째 요청 사이에 간격 추가
-        print("\n10초 대기 중...")
-        time.sleep(10)
-        
-        print("\n2. 인사말 요청 시작...")
-        greeting_response = make_greeting_request()
-        print(f"\n응답 길이: {len(greeting_response)} 자")
-        
-        print("\n데모 완료! New Relic 대시보드에서 다음 이벤트 확인:")
-        print("- LlmCompletion: Bedrock API 호출 기본 이벤트")
-        print("- KoreaHistoryCompletion: 한국 역사 요청 커스텀 이벤트")
-        print("- GreetingCompletion: 인사말 요청 커스텀 이벤트")
-        print("- StreamChunk: 스트리밍 응답의 각 청크 이벤트")
-
-if __name__ == "__main__":
-    run_demo()
-```
-
-### 강화된 오류 처리 및 응답 파싱
-
-다양한 응답 형식과 오류를 처리하는 개선된 코드:
-
-```python
-def process_bedrock_response(response, request_info=None):
-    """
-    AWS Bedrock 응답을 안전하게 처리하는 함수
-    
-    Args:
-        response: Bedrock API 응답 객체
-        request_info: 요청 관련 메타데이터 (선택 사항)
-        
-    Returns:
-        dict: 처리된 응답 데이터
-    """
-    result = {
-        'success': False,
-        'content': '',
-        'raw_content': None,
-        'error': None
-    }
-    
-    if request_info:
-        result.update(request_info)
-    
-    try:
-        # 응답 본문 가져오기
-        if "body" in response:
-            # 응답 바디가 스트림일 경우 읽기
-            raw_bytes = response.get("body").read()
-            
-            try:
-                # 바이트를 문자열로 디코딩 시도
-                raw_text = raw_bytes.decode("utf-8")
-                result['raw_content'] = raw_text
-                
-                # JSON 파싱 시도
-                response_body = json.loads(raw_text)
-                
-                # 응답 내용 추출 (여러 형식 지원)
-                # Claude 스타일 응답 (content 배열)
-                if "content" in response_body and isinstance(response_body["content"], list):
-                    for content_item in response_body["content"]:
-                        if content_item.get("type") == "text":
-                            result['content'] += content_item.get("text", "")
-                
-                # 단일 텍스트 응답
-                elif "completion" in response_body:
-                    result['content'] = response_body["completion"]
-                
-                # 다른 형식 (텍스트 필드 찾기)
-                elif "text" in response_body:
-                    result['content'] = response_body["text"]
-                
-                result['success'] = True
-                result['parsed_response'] = response_body
-                
-            except UnicodeDecodeError:
-                result['error'] = "UTF-8 디코딩 실패"
-                # 다른 인코딩 시도
-                for encoding in ['latin1', 'cp1252', 'iso-8859-1']:
-                    try:
-                        raw_text = raw_bytes.decode(encoding)
-                        result['raw_content'] = raw_text
-                        result['error'] = f"{encoding}으로 디코딩됨"
-                        break
-                    except UnicodeDecodeError:
-                        continue
-            
-            except json.JSONDecodeError as json_err:
-                result['error'] = f"JSON 파싱 오류: {str(json_err)}"
-                # 원본 텍스트 응답을 그대로 사용
-                result['content'] = result['raw_content']
-        else:
-            result['error'] = "응답에 body 필드가 없음"
-    
-    except Exception as e:
-        result['error'] = f"응답 처리 중 예외 발생: {str(e)}"
-    
-    # 메타데이터 추가
-    if 'ResponseMetadata' in response:
-        result['request_id'] = response.get('ResponseMetadata', {}).get('RequestId')
-        result['status_code'] = response.get('ResponseMetadata', {}).get('HTTPStatusCode')
-    
-    return result
-```
-
-### 이벤트 로깅 최적화를 위한 EventLogger 클래스
-
-여러 이벤트를 추적하고 이벤트 전송 문제를 디버깅하려면:
-
-```python
-class EventLogger:
-    """
-    New Relic 이벤트 로깅을 위한 유틸리티 클래스
-    """
-    def __init__(self, application=None):
-        self.events = []
-        self.application = application
-        
-        # 필요한 경우 New Relic 에이전트 함수 패치
-        if application and hasattr(newrelic.agent, 'record_custom_event'):
-            self.original_record = newrelic.agent.record_custom_event
-            
-            def patched_record(event_type, attributes, application=None):
-                print(f"New Relic 이벤트 감지: {event_type}")
-                # 로컬 이벤트 로거에 기록
-                self.log_event(event_type, attributes)
-                
-                # 애플리케이션이 전달되지 않았다면 기본값 사용
-                if application is None:
-                    application = self.application
-                
-                # 원본 함수 호출
-                try:
-                    result = self.original_record(event_type, attributes, application=application)
-                    print(f"이벤트 기록 성공: {event_type}")
-                    return result
-                except Exception as e:
-                    print(f"이벤트 기록 실패: {str(e)}")
-                    return None
-            
-            # 함수 패치
-            newrelic.agent.record_custom_event = patched_record
-            print("New Relic 이벤트 기록 함수가 패치되었습니다.")
-    
-    def log_event(self, event_type, attributes):
-        """
-        이벤트를 로컬에 기록하고 New Relic에도 직접 전송 시도
-        """
-        print(f"이벤트 기록: {event_type}")
-        
-        # 타임스탬프 추가
-        if 'timestamp' not in attributes:
-            attributes['timestamp'] = time.time()
-        
-        # 로컬 큐에 이벤트 추가
-        self.events.append({
-            'event_type': event_type,
-            'attributes': attributes
-        })
-        
-        # 직접 New Relic에 이벤트 전송 시도
-        try:
-            if self.application:
-                # 트랜잭션 내에서 이벤트 기록
-                with newrelic.agent.BackgroundTask(self.application, name=f"EventRecording/{event_type}"):
-                    self.original_record(event_type, attributes, application=self.application)
-        except Exception as e:
-            print(f"직접 이벤트 전송 실패: {str(e)}")
-    
-    def get_events(self, event_type=None, limit=None):
-        """
-        기록된 이벤트 가져오기 (필터링 옵션 포함)
-        """
-        if event_type:
-            filtered = [e for e in self.events if e['event_type'] == event_type]
-        else:
-            filtered = self.events
-        
-        if limit:
-            return filtered[-limit:]
-        return filtered
-    
-    def print_summary(self):
-        """
-        기록된 이벤트 요약 출력
-        """
-        event_types = {}
-        for event in self.events:
-            event_type = event['event_type']
-            if event_type in event_types:
-                event_types[event_type] += 1
-            else:
-                event_types[event_type] = 1
-        
-        print("\n=== 이벤트 요약 ===")
-        print(f"총 이벤트 수: {len(self.events)}")
-        for event_type, count in event_types.items():
-            print(f"- {event_type}: {count}개")
-```
-
-### 안정적인 트랜잭션 관리를 위한 TransactionManager 클래스
-
-```python
-class TransactionManager:
-    """
-    New Relic 트랜잭션 관리를 위한 유틸리티 클래스
-    """
-    def __init__(self, application=None):
-        self.application = application
-        self.active_transactions = {}
-    
-    def start(self, name, custom_params=None):
-        """
-        트랜잭션 시작
-        
-        Args:
-            name: 트랜잭션 이름
-            custom_params: 트랜잭션 매개변수 (선택 사항)
-            
-        Returns:
-            transaction: 트랜잭션 객체 또는 None
-        """
-        transaction_id = str(uuid.uuid4())
-        
-        try:
-            if self.application:
-                transaction_name = f"Python/{name}"
-                
-                # 트랜잭션 시작
-                transaction = newrelic.agent.BackgroundTask(
-                    self.application, 
-                    name=transaction_name
-                )
-                transaction.__enter__()
-                
-                # 액티브 트랜잭션 관리
-                self.active_transactions[transaction_id] = {
-                    'transaction': transaction,
-                    'name': name,
-                    'start_time': time.time()
-                }
-                
-                # 커스텀 매개변수 추가
-                if custom_params and hasattr(newrelic.agent, 'add_custom_parameters'):
-                    newrelic.agent.add_custom_parameters(custom_params)
-                
-                print(f"트랜잭션 시작됨: {name} (ID: {transaction_id})")
-                return transaction_id
-            else:
-                print("트랜잭션을 시작할 수 없음: 애플리케이션 객체가 없음")
-                return None
-        except Exception as e:
-            print(f"트랜잭션 시작 오류: {str(e)}")
-            return None
-    
-    def end(self, transaction_id, success=True):
-        """
-        트랜잭션 종료
-        
-        Args:
-            transaction_id: 시작 시 반환된 트랜잭션 ID
-            success: 성공 여부 (기본값: True)
-        """
-        if transaction_id not in self.active_transactions:
-            print(f"알 수 없는 트랜잭션 ID: {transaction_id}")
-            return
-        
-        transaction_info = self.active_transactions[transaction_id]
-        transaction = transaction_info['transaction']
-        
-        try:
-            # 트랜잭션 종료
-            transaction.__exit__(None, None, None)
-            
-            # 트랜잭션 정보 업데이트
-            duration = time.time() - transaction_info['start_time']
-            print(f"트랜잭션 종료됨: {transaction_info['name']} (소요 시간: {duration:.2f}초)")
-            
-            # 활성 트랜잭션 목록에서 제거
-            del self.active_transactions[transaction_id]
-            
-        except Exception as e:
-            print(f"트랜잭션 종료 오류: {str(e)}")
-    
-    def with_transaction(self, name, custom_params=None):
-        """
-        컨텍스트 매니저로 사용하기 위한 데코레이터
-        
-        사용 예:
-        with transaction_manager.with_transaction("MyTransaction") as tx_id:
-            # 작업 수행
-        """
-        class TransactionContext:
-            def __init__(self, manager, tx_name, params):
-                self.manager = manager
-                self.name = tx_name
-                self.params = params
-                self.tx_id = None
-            
-            def __enter__(self):
-                self.tx_id = self.manager.start(self.name, self.params)
-                return self.tx_id
-            
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                success = exc_type is None
-                if self.tx_id:
-                    self.manager.end(self.tx_id, success)
-                return False  # 예외 처리를 호출자에게 위임
-        
-        return TransactionContext(self, name, custom_params)
-```
-
-## 대용량 트래픽 최적화
-
-대용량 트래픽 환경에서 성능을 최적화하려면 다음 옵션을 활용하세요:
-
-```python
-monitor_bedrock(bedrock_client, {
-    'application_name': 'HighVolumeApp',
-    'disable_streaming_events': True,  # 스트리밍 이벤트 비활성화
-})
-```
-
-## New Relic 트랜잭션 관리
-
-이벤트가 제대로 기록되지 않는 문제가 발생하는 경우, 명시적인 트랜잭션 관리를 사용할 수 있습니다. 트랜잭션은 New Relic에서 이벤트를 올바르게 기록하기 위해 필요합니다.
-
-```python
-import newrelic.agent
-import uuid
 from nr_bedrock_observability import monitor_bedrock
 
-# New Relic 애플리케이션 객체 얻기
-nr_application = newrelic.agent.application()
-
-# 트랜잭션 시작 함수
-def start_transaction(name):
-    transaction = None
-    if nr_application:
-        print(f"New Relic 트랜잭션 시작: {name}")
-        transaction = newrelic.agent.BackgroundTask(nr_application, name=f"Python/{name}")
-        transaction.__enter__()
-    return transaction
-
-# 트랜잭션 종료 함수
-def end_transaction(transaction):
+# 트랜잭션에 대한 백그라운드 태스크 정의
+@newrelic.agent.background_task(name='rag_workflow')
+def rag_workflow(user_query):
+    # 고유 트레이스 ID 생성
+    trace_id = str(uuid.uuid4())
+    
+    # 트랜잭션에 메타데이터 추가
+    transaction = newrelic.agent.current_transaction()
     if transaction:
-        print("New Relic 트랜잭션 종료")
-        transaction.__exit__(None, None, None)
-
-# 메인 함수 예시
-def main():
-    # 트랜잭션 시작
-    transaction = start_transaction("main")
+        transaction.add_custom_attribute('trace.id', trace_id)
+        transaction.add_custom_attribute('workflow.type', 'rag')
+        
+    # OpenSearch 검색 실행
+    with newrelic.agent.FunctionTrace(name='search_opensearch'):
+        # 트레이스 ID 공유를 위한 스팬 속성 추가
+        newrelic.agent.add_custom_span_attribute('trace.id', trace_id)
+        
+        # OpenSearch 검색 로직...
+        opensearch_client = boto3.client('opensearch')
+        # 검색 실행 코드...
+        search_results = [...]  # 검색 결과
     
-    try:
-        # Bedrock 클라이언트 초기화
-        bedrock_client = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
+    # Bedrock 호출로 LLM 응답 생성
+    with newrelic.agent.FunctionTrace(name='generate_bedrock_response'):
+        # 트레이스 ID 공유를 위한 스팬 속성 추가
+        newrelic.agent.add_custom_span_attribute('trace.id', trace_id)
         
-        # New Relic 모니터링 설정 - 애플리케이션 객체 직접 전달
-        monitor_options = {
-            'application_name': 'Bedrock-Test-App',
-            'new_relic_api_key': 'YOUR_LICENSE_KEY',
-            'application': nr_application  # 애플리케이션 객체 직접 전달
-        }
+        # Bedrock 클라이언트 설정
+        bedrock_client = boto3.client('bedrock-runtime')
+        monitored_client = monitor_bedrock(bedrock_client, {
+            'application_name': 'MyRagApp'
+        })
         
-        monitored_client = monitor_bedrock(bedrock_client, monitor_options)
-        
-        # API 호출 및 데이터 처리
-        # ...
+        # LLM 응답 생성
+        # ...Bedrock 모델 호출 코드...
     
-    finally:
-        # 트랜잭션 종료
-        end_transaction(transaction)
-
-if __name__ == "__main__":
-    main()
+    return {
+        'query': user_query,
+        'results': search_results,
+        'response': llm_response,
+        'trace_id': trace_id
+    }
 ```
 
-### 스트리밍 API와 트랜잭션 관리
+### 전체 샘플 코드
 
-스트리밍 API를 사용할 때도 트랜잭션 관리가 중요합니다:
+더 자세한 구현은 `samples/rag_workflow_tracing.py`를 참조하세요. 이 샘플 코드는 다음 기능을 포함합니다:
 
-```python
-def test_streaming_completion():
-    # 트랜잭션 시작
-    transaction = start_transaction("test_streaming_completion")
-    
-    try:
-        # API 호출
-        stream_response = monitored_client.invoke_model_with_response_stream(
-            modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 300,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "구름에 대한 짧은 시를 써줘."
-                            }
-                        ]
-                    }
-                ],
-                "temperature": 0.7
-            })
-        )
-        
-        # 스트리밍 청크 처리
-        for event in stream_response['body']:
-            chunk_bytes = event['chunk']['bytes']
-            chunk_str = chunk_bytes.decode('utf-8')
-            try:
-                chunk = json.loads(chunk_str)
-                # 다양한 응답 형식 처리
-                if 'delta' in chunk and 'text' in chunk['delta']:
-                    chunk_text = chunk['delta']['text']
-                    print(chunk_text, end='', flush=True)
-                # 기타 형식 처리
-            except json.JSONDecodeError:
-                print(f"JSON 파싱 오류: {chunk_str}")
-    
-    finally:
-        # 트랜잭션 종료
-        end_transaction(transaction)
-```
+1. 고유한 트레이스 ID 생성 및 모든 단계에서 공유
+2. OpenSearch 검색과 Bedrock 호출을 하나의 트랜잭션으로 연결
+3. 각 단계에서 유용한 메타데이터 수집
+4. New Relic UI에서 전체 워크플로우 시각화 및 분석
 
-## 이벤트 로깅 최적화
+### 트레이싱 데이터 보기
 
-이벤트 로깅이 제대로 되지 않는 경우, 다음과 같이 이벤트 클라이언트를 커스텀하게 설정할 수 있습니다:
+New Relic UI에서 다음과 같이 통합 RAG 워크플로우 트레이스를 확인할 수 있습니다:
 
-```python
-from nr_bedrock_observability.events_client import BedrockEventClient
-
-# 커스텀 이벤트 리스너 클래스 정의
-class EventLogger:
-    def __init__(self, app=None):
-        self.events = []
-        self.app = app
-    
-    def log_event(self, event_type, attributes):
-        print(f"New Relic 이벤트 전송: {event_type}")
-        self.events.append({"event_type": event_type, "attributes": attributes})
-
-# 이벤트 로거 초기화
-event_logger = EventLogger(app=nr_application)
-
-# New Relic 에이전트 커스텀 이벤트 기록 함수 패치
-if nr_application and hasattr(newrelic.agent, 'record_custom_event'):
-    original_record_custom_event = newrelic.agent.record_custom_event
-    
-    def custom_record_event(event_type, attributes, application=None):
-        print(f"New Relic 이벤트 감지: {event_type}")
-        event_logger.log_event(event_type, attributes)
-        # 명시적으로 애플리케이션 객체 전달
-        return original_record_custom_event(event_type, attributes, application=nr_application)
-    
-    newrelic.agent.record_custom_event = custom_record_event
-    print("New Relic 커스텀 이벤트 로깅이 활성화되었습니다.")
-```
-
-또는 이벤트 클라이언트를 패치할 수 있습니다:
-
-```python
-# 이벤트 클라이언트 패치
-if nr_application:
-    # 원본 send 메서드 저장
-    original_send = BedrockEventClient.send
-    
-    # 새로운 send 메서드
-    def patched_send(self, event_data):
-        if nr_application and event_data:
-            event_type = event_data.get('eventType')
-            attributes = event_data.get('attributes', {})
-            
-            if event_type:
-                # 트랜잭션 내에서 직접 이벤트 기록
-                with newrelic.agent.BackgroundTask(nr_application, name=f"DirectEvent/{event_type}"):
-                    newrelic.agent.record_custom_event(event_type, attributes, application=nr_application)
-        
-        # 원본 함수도 호출
-        return original_send(self, event_data)
-    
-    # send 메서드 패치
-    BedrockEventClient.send = patched_send
-```
+1. New Relic One에서 "Distributed Tracing" 메뉴로 이동
+2. 검색창에 `workflow.type:rag` 또는 `trace.id:[특정 ID]`로 검색
+3. 해당 트레이스를 클릭하여 사용자 질문, 검색 쿼리, LLM 응답 과정을 포함한 전체 워크플로우 확인
 
 ## 개발
 

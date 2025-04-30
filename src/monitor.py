@@ -27,7 +27,9 @@ class MonitorBedrockOptions:
         host: Optional[str] = None,
         port: Optional[int] = None,
         track_token_usage: bool = True,
-        disable_streaming_events: bool = False
+        disable_streaming_events: bool = False,
+        collect_feedback: bool = False,
+        feedback_callback: Optional[Callable[[str, str], Dict[str, Any]]] = None
     ):
         self.application_name = application_name
         self.new_relic_api_key = new_relic_api_key
@@ -35,6 +37,8 @@ class MonitorBedrockOptions:
         self.port = port
         self.track_token_usage = track_token_usage
         self.disable_streaming_events = disable_streaming_events
+        self.collect_feedback = collect_feedback
+        self.feedback_callback = feedback_callback
 
 def monitor_bedrock(
     bedrock_client: Any,
@@ -60,7 +64,9 @@ def monitor_bedrock(
             host=options.get('host'),
             port=options.get('port'),
             track_token_usage=options.get('track_token_usage', True),
-            disable_streaming_events=options.get('disable_streaming_events', False)
+            disable_streaming_events=options.get('disable_streaming_events', False),
+            collect_feedback=options.get('collect_feedback', False),
+            feedback_callback=options.get('feedback_callback')
         )
     else:
         monitor_options = options
@@ -439,32 +445,33 @@ def _handle_invoke_model_response(
     """
     invoke_model 응답 처리
     """
-    response = response_info.get('response')
-    response_error = response_info.get('response_error')
-    response_time = response_info.get('duration', 0)
-    
-    # 요청 본문 파싱
-    request_body = request.get('body', {})
-    if isinstance(request_body, (bytes, str)):
-        request_body = _parse_body(request_body)
-    
-    # 응답 데이터 추출
-    response_data = _extract_response_data(response) if response else {}
-    
-    # 이벤트 데이터 생성
-    event_data = factory.create_event_data({
-        'request': {
-            **request,
-            'parsed_body': request_body
-        },
-        'response_data': response_data,
-        'response_time': response_time,
-        'response_error': response_error
-    })
-    
-    # 이벤트 전송
-    if event_data:
-        client.send(event_data)
+    try:
+        # 응답 데이터 추출
+        response_data = _extract_response_data(response_info)
+        
+        # 이벤트 데이터 생성
+        event_data = factory.create_completion_event_data(
+            request=request,
+            response=response_data
+        )
+        
+        # 피드백 수집이 활성화된 경우
+        if client._monitor_options.collect_feedback and client._monitor_options.feedback_callback:
+            feedback_data = client._monitor_options.feedback_callback(
+                request.get('input', ''),
+                response_data.get('output', '')
+            )
+            if feedback_data:
+                event_data.update({
+                    'feedback': feedback_data.get('feedback'),
+                    'sentiment': feedback_data.get('sentiment'),
+                    'feedback_message': feedback_data.get('feedback_message')
+                })
+        
+        # 이벤트 전송
+        client._event_client.send_event(event_data)
+    except Exception as e:
+        logger.error(f"Error handling invoke_model response: {str(e)}")
 
 def _handle_invoke_model_stream_response(
     request: Dict[str, Any],
@@ -521,28 +528,33 @@ def _handle_converse_response(
     """
     converse 응답 처리
     """
-    response = response_info.get('response')
-    response_error = response_info.get('response_error')
-    response_time = response_info.get('duration', 0)
-    
-    # 요청 본문 추출
-    request_messages = request.get('messages', [])
-    
-    # 응답 데이터 추출
-    response_data = _extract_response_data(response) if response else {}
-    
-    # 이벤트 데이터 생성
-    event_data_list = factory.create_event_data_list({
-        'request': request,
-        'response_data': response_data,
-        'response_time': response_time,
-        'response_error': response_error
-    })
-    
-    # 이벤트 전송
-    if event_data_list:
-        for event_data in event_data_list:
-            client.send(event_data)
+    try:
+        # 응답 데이터 추출
+        response_data = _extract_response_data(response_info)
+        
+        # 이벤트 데이터 생성
+        event_data = factory.create_chat_completion_event_data(
+            request=request,
+            response=response_data
+        )
+        
+        # 피드백 수집이 활성화된 경우
+        if client._monitor_options.collect_feedback and client._monitor_options.feedback_callback:
+            feedback_data = client._monitor_options.feedback_callback(
+                request.get('messages', []),
+                response_data.get('output', '')
+            )
+            if feedback_data:
+                event_data.update({
+                    'feedback': feedback_data.get('feedback'),
+                    'sentiment': feedback_data.get('sentiment'),
+                    'feedback_message': feedback_data.get('feedback_message')
+                })
+        
+        # 이벤트 전송
+        client._event_client.send_event(event_data)
+    except Exception as e:
+        logger.error(f"Error handling converse response: {str(e)}")
 
 def _handle_embedding_response(
     request: Dict[str, Any],
