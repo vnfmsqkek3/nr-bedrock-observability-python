@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Any, Optional, Union, Callable, TypeVar, cast, List
 import inspect
 import json
+import newrelic.agent
 
 from .events_client import create_event_client, EventClientOptions
 from .event_data_factory import (
@@ -117,16 +118,42 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_invoke_model)
             
-            # 응답 모니터링
-            return monitor_response(
-                lambda: invoke_model_func(*args, **kwargs),
-                lambda response_info: _handle_invoke_model_response(
-                    request, 
-                    response_info, 
-                    completion_event_data_factory, 
-                    event_client
+            # New Relic 애플리케이션 객체 가져오기
+            app = None
+            if hasattr(bedrock_client, '_monitor_options') and hasattr(bedrock_client._monitor_options, 'application'):
+                app = bedrock_client._monitor_options.application
+            
+            # 트랜잭션 관리
+            transaction = None
+            if app:
+                try:
+                    # 현재 활성 트랜잭션이 있는지 확인
+                    current_transaction = newrelic.agent.current_transaction()
+                    if not current_transaction:
+                        # 활성 트랜잭션이 없는 경우에만 새 트랜잭션 생성
+                        transaction = newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/invoke_model")
+                        transaction.__enter__()
+                except Exception as e:
+                    logger.warning(f"New Relic transaction initialization failed: {str(e)}")
+            
+            try:
+                # 응답 모니터링
+                return monitor_response(
+                    lambda: invoke_model_func(*args, **kwargs),
+                    lambda response_info: _handle_invoke_model_response(
+                        request, 
+                        response_info, 
+                        completion_event_data_factory, 
+                        event_client
+                    )
                 )
-            )
+            finally:
+                # 트랜잭션 종료
+                if transaction:
+                    try:
+                        transaction.__exit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"New Relic transaction cleanup failed: {str(e)}")
             
         return patched_invoke_model
     
@@ -168,16 +195,42 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_converse)
             
-            # 응답 모니터링
-            return monitor_response(
-                lambda: converse_func(*args, **kwargs),
-                lambda response_info: _handle_converse_response(
-                    request, 
-                    response_info, 
-                    chat_completion_event_data_factory, 
-                    event_client
+            # New Relic 애플리케이션 객체 가져오기
+            app = None
+            if hasattr(bedrock_client, '_monitor_options') and hasattr(bedrock_client._monitor_options, 'application'):
+                app = bedrock_client._monitor_options.application
+            
+            # 트랜잭션 관리
+            transaction = None
+            if app:
+                try:
+                    # 현재 활성 트랜잭션이 있는지 확인
+                    current_transaction = newrelic.agent.current_transaction()
+                    if not current_transaction:
+                        # 활성 트랜잭션이 없는 경우에만 새 트랜잭션 생성
+                        transaction = newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/converse")
+                        transaction.__enter__()
+                except Exception as e:
+                    logger.warning(f"New Relic transaction initialization failed: {str(e)}")
+            
+            try:
+                # 응답 모니터링
+                return monitor_response(
+                    lambda: converse_func(*args, **kwargs),
+                    lambda response_info: _handle_converse_response(
+                        request, 
+                        response_info, 
+                        chat_completion_event_data_factory, 
+                        event_client
+                    )
                 )
-            )
+            finally:
+                # 트랜잭션 종료
+                if transaction:
+                    try:
+                        transaction.__exit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"New Relic transaction cleanup failed: {str(e)}")
             
         return patched_converse
     
