@@ -370,6 +370,134 @@ if hasattr(response, 'citations') and response.citations:
         print(f"- {citation.retrievedReferences[0].content[:100]}...")
 ```
 
+### 피드백 수집 기능 사용하기
+
+```python
+import boto3
+import json
+from nr_bedrock_observability import monitor_bedrock
+
+# 피드백 콜백 함수 정의
+def feedback_callback(input_text: str, output_text: str) -> dict:
+    """
+    사용자로부터 피드백을 수집하는 콜백 함수
+    
+    :param input_text: 사용자 입력 텍스트
+    :param output_text: 모델 응답 텍스트
+    :return: 피드백 데이터 (feedback, sentiment, feedback_message)
+    """
+    # 여기서 실제로는 UI에서 사용자 입력을 받거나 API를 통해 피드백을 수집
+    # 예제에서는 하드코딩된 값을 반환
+    return {
+        'feedback': 'positive',  # 'positive', 'negative', 'neutral'
+        'sentiment': 0.8,  # -1.0에서 1.0 사이의 값
+        'feedback_message': '답변이 매우 유용했습니다.'
+    }
+
+# Bedrock 클라이언트 생성
+bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
+
+# 모니터링 설정 - 피드백 수집 활성화
+monitor_bedrock(bedrock, {
+    'application_name': 'MyFeedbackApp',
+    'collect_feedback': True,  # 피드백 수집 활성화
+    'feedback_callback': feedback_callback  # 피드백 콜백 함수 지정
+})
+
+# Claude 3.5 Sonnet 모델 호출
+response = bedrock.invoke_model(
+    modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+    body=json.dumps({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 300,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "한국의 역사에 대해 간략하게 설명해줘."
+                    }
+                ]
+            }
+        ],
+        "temperature": 0.7
+    })
+)
+
+# 응답 처리
+response_body = json.loads(response['body'].read().decode('utf-8'))
+if "content" in response_body and len(response_body["content"]) > 0:
+    for content_item in response_body["content"]:
+        if content_item["type"] == "text":
+            print(content_item["text"])
+
+# New Relic에서 피드백 데이터 확인
+# 1. New Relic One에서 "Distributed Tracing" 메뉴로 이동
+# 2. 검색창에 `applicationName:MyFeedbackApp`로 검색
+# 3. 해당 트레이스를 클릭하여 피드백, 감정 점수, 피드백 메시지 확인
+```
+
+### 채팅 완성 API에서 피드백 수집
+
+```python
+import boto3
+import json
+from nr_bedrock_observability import monitor_bedrock
+
+# 채팅 완성을 위한 피드백 콜백 함수
+def chat_feedback_callback(messages: list, output_text: str) -> dict:
+    """
+    채팅 완성에서 피드백을 수집하는 콜백 함수
+    
+    :param messages: 채팅 메시지 목록
+    :param output_text: 모델 응답 텍스트
+    :return: 피드백 데이터
+    """
+    # 마지막 사용자 메시지 추출
+    last_user_message = next(
+        (msg['content'][0]['text'] for msg in reversed(messages) 
+         if msg['role'] == 'user'),
+        ''
+    )
+    
+    # 여기서 실제로는 UI에서 사용자 입력을 받거나 API를 통해 피드백을 수집
+    return {
+        'feedback': 'positive',
+        'sentiment': 0.9,
+        'feedback_message': f'"{last_user_message}"에 대한 답변이 매우 도움이 되었습니다.'
+    }
+
+# Bedrock 클라이언트 생성
+bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-2')
+
+# 모니터링 설정 - 채팅 완성용 피드백 수집 활성화
+monitor_bedrock(bedrock, {
+    'application_name': 'MyChatFeedbackApp',
+    'collect_feedback': True,
+    'feedback_callback': chat_feedback_callback
+})
+
+# 채팅 완성 API 호출
+response = bedrock.converse(
+    modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+    messages=[
+        {
+            'role': 'user',
+            'content': [{'type': 'text', 'text': 'AWS Bedrock이란 무엇인가요?'}]
+        }
+    ]
+)
+
+# 응답 처리
+print(response['output']['message']['content'][0]['text'])
+
+# New Relic에서 채팅 피드백 데이터 확인
+# 1. New Relic One에서 "Distributed Tracing" 메뉴로 이동
+# 2. 검색창에 `applicationName:MyChatFeedbackApp`로 검색
+# 3. 해당 트레이스를 클릭하여 채팅 피드백 데이터 확인
+```
+
 ## 이벤트 데이터 구조
 
 이 라이브러리는 이벤트 데이터를 구조화하기 위해 다음과 같은 클래스를 제공합니다:
