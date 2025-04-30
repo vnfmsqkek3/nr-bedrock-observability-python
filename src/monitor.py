@@ -167,21 +167,47 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_invoke_model_with_response_stream)
             
-            # 스트리밍 이벤트 비활성화 확인
-            if monitor_options.disable_streaming_events:
-                # 이벤트 없이 원본 함수 호출
-                return invoke_model_with_response_stream_func(*args, **kwargs)
+            # New Relic 애플리케이션 객체 가져오기
+            app = None
+            if hasattr(bedrock_client, '_monitor_options') and hasattr(bedrock_client._monitor_options, 'application'):
+                app = bedrock_client._monitor_options.application
             
-            # 응답 모니터링
-            return monitor_streaming_response(
-                lambda: invoke_model_with_response_stream_func(*args, **kwargs),
-                lambda response_info: _handle_invoke_model_stream_response(
-                    request, 
-                    response_info, 
-                    completion_event_data_factory, 
-                    event_client
+            # 트랜잭션 관리
+            transaction = None
+            if app:
+                try:
+                    # 현재 활성 트랜잭션이 있는지 확인
+                    current_transaction = newrelic.agent.current_transaction()
+                    if not current_transaction:
+                        # 활성 트랜잭션이 없는 경우에만 새 트랜잭션 생성
+                        transaction = newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/invoke_model_with_response_stream")
+                        transaction.__enter__()
+                except Exception as e:
+                    logger.warning(f"New Relic transaction initialization failed: {str(e)}")
+            
+            try:
+                # 스트리밍 이벤트 비활성화 확인
+                if monitor_options.disable_streaming_events:
+                    # 이벤트 없이 원본 함수 호출
+                    return invoke_model_with_response_stream_func(*args, **kwargs)
+                
+                # 응답 모니터링
+                return monitor_streaming_response(
+                    lambda: invoke_model_with_response_stream_func(*args, **kwargs),
+                    lambda response_info: _handle_invoke_model_stream_response(
+                        request, 
+                        response_info, 
+                        completion_event_data_factory, 
+                        event_client
+                    )
                 )
-            )
+            finally:
+                # 트랜잭션 종료
+                if transaction:
+                    try:
+                        transaction.__exit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"New Relic transaction cleanup failed: {str(e)}")
             
         return patched_invoke_model_with_response_stream
     
@@ -244,56 +270,74 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_generate_with_model)
             
-            # 응답 모니터링
-            return monitor_response(
-                lambda: generate_with_model_func(*args, **kwargs),
-                lambda response_info: _handle_generate_with_model_response(
-                    request, 
-                    response_info, 
-                    completion_event_data_factory, 
-                    event_client
+            # New Relic 애플리케이션 객체 가져오기
+            app = None
+            if hasattr(bedrock_client, '_monitor_options') and hasattr(bedrock_client._monitor_options, 'application'):
+                app = bedrock_client._monitor_options.application
+            
+            # 트랜잭션 관리
+            transaction = None
+            if app:
+                try:
+                    # 현재 활성 트랜잭션이 있는지 확인
+                    current_transaction = newrelic.agent.current_transaction()
+                    if not current_transaction:
+                        # 활성 트랜잭션이 없는 경우에만 새 트랜잭션 생성
+                        transaction = newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/generate_with_model")
+                        transaction.__enter__()
+                except Exception as e:
+                    logger.warning(f"New Relic transaction initialization failed: {str(e)}")
+            
+            try:
+                # 응답 모니터링
+                return monitor_response(
+                    lambda: generate_with_model_func(*args, **kwargs),
+                    lambda response_info: _handle_generate_with_model_response(
+                        request, 
+                        response_info, 
+                        completion_event_data_factory, 
+                        event_client
+                    )
                 )
-            )
+            finally:
+                # 트랜잭션 종료
+                if transaction:
+                    try:
+                        transaction.__exit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"New Relic transaction cleanup failed: {str(e)}")
             
         return patched_generate_with_model
     
-    # Bedrock 클라이언트 패치
-    patched_invoke_model = patch_invoke_model(original_invoke_model)
-    bedrock_client.invoke_model = patched_invoke_model
-    
-    # Stream API가 있는 경우 패치
-    if original_invoke_model_with_response_stream:
-        patched_invoke_model_with_response_stream = patch_invoke_model_with_response_stream(
-            original_invoke_model_with_response_stream
-        )
-        bedrock_client.invoke_model_with_response_stream = patched_invoke_model_with_response_stream
-    
-    # Converse API가 있는 경우 패치
-    if original_converse:
-        patched_converse = patch_converse(original_converse)
-        bedrock_client.converse = patched_converse
-    
-    # generate_with_model API가 있는 경우 패치
-    if original_generate_with_model:
-        patched_generate_with_model = patch_generate_with_model(
-            original_generate_with_model
-        )
-        bedrock_client.generate_with_model = patched_generate_with_model
-    
-    # 임베딩 메서드가 있는지 확인
-    if hasattr(bedrock_client, 'create_embedding'):
-        original_create_embedding = bedrock_client.create_embedding
-        
-        def patch_create_embedding(
-            create_embedding_func: Callable[..., Any]
-        ) -> Callable[..., Any]:
-            """
-            create_embedding 함수 패치
-            """
-            def patched_create_embedding(*args, **kwargs):
-                # 요청 정보 추출
-                request = _extract_request_from_args_kwargs(args, kwargs, original_create_embedding)
-                
+    def patch_create_embedding(
+        create_embedding_func: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        """
+        create_embedding 함수 패치
+        """
+        def patched_create_embedding(*args, **kwargs):
+            # 요청 정보 추출
+            request = _extract_request_from_args_kwargs(args, kwargs, original_create_embedding)
+            
+            # New Relic 애플리케이션 객체 가져오기
+            app = None
+            if hasattr(bedrock_client, '_monitor_options') and hasattr(bedrock_client._monitor_options, 'application'):
+                app = bedrock_client._monitor_options.application
+            
+            # 트랜잭션 관리
+            transaction = None
+            if app:
+                try:
+                    # 현재 활성 트랜잭션이 있는지 확인
+                    current_transaction = newrelic.agent.current_transaction()
+                    if not current_transaction:
+                        # 활성 트랜잭션이 없는 경우에만 새 트랜잭션 생성
+                        transaction = newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/create_embedding")
+                        transaction.__enter__()
+                except Exception as e:
+                    logger.warning(f"New Relic transaction initialization failed: {str(e)}")
+            
+            try:
                 # 응답 모니터링
                 return monitor_response(
                     lambda: create_embedding_func(*args, **kwargs),
@@ -304,190 +348,131 @@ def monitor_bedrock(
                         event_client
                     )
                 )
-                
-            return patched_create_embedding
+            finally:
+                # 트랜잭션 종료
+                if transaction:
+                    try:
+                        transaction.__exit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"New Relic transaction cleanup failed: {str(e)}")
             
-        bedrock_client.create_embedding = patch_create_embedding(original_create_embedding)
-    
-    # New Relic에 패치 정보 기록
-    logger.info(f"AWS Bedrock client patched for New Relic monitoring.")
-    
-    return bedrock_client
+        return patched_create_embedding
 
 def monitor_response(
     call: Callable[[], T],
     on_response: Callable[[Dict[str, Any]], None]
 ) -> T:
     """
-    응답을 모니터링하고 New Relic에 데이터 전송
-    
-    :param call: API 호출 함수
-    :param on_response: 응답 처리 콜백
-    :return: API 호출 결과
+    응답 모니터링
     """
     start_time = time.time()
+    error = None
+    response = None
     
     try:
         response = call()
-        try:
-            on_response({
-                'response': response,
-                'response_error': None,
-                'duration': int((time.time() - start_time) * 1000)  # 밀리초 단위
-            })
-        except Exception as e:
-            logger.error(f"Error processing response: {str(e)}")
-            
         return response
-        
-    except Exception as error:
-        try:
-            error_obj = create_error_from_exception(error)
-            on_response({
-                'response': None,
-                'response_error': error_obj,
-                'duration': int((time.time() - start_time) * 1000)  # 밀리초 단위
-            })
-        except Exception as e:
-            logger.error(f"Error processing error response: {str(e)}")
-            
+    except Exception as e:
+        error = e
         raise
+    finally:
+        try:
+            # 응답 정보 수집
+            response_info = {
+                'duration': time.time() - start_time,
+                'error': error,
+                'response': response
+            }
+            
+            # 응답 처리
+            on_response(response_info)
+        except Exception as e:
+            logger.error(f"Response monitoring error: {str(e)}")
 
 def monitor_streaming_response(
     call: Callable[[], T],
     on_response: Callable[[Dict[str, Any]], None]
 ) -> T:
     """
-    스트리밍 응답을 모니터링하고 New Relic에 데이터 전송
-    
-    :param call: API 호출 함수
-    :param on_response: 응답 처리 콜백
-    :return: 래핑된 스트리밍 응답
+    스트리밍 응답 모니터링
     """
     start_time = time.time()
+    error = None
+    response = None
     
     try:
         response = call()
-        
-        # 응답 메타데이터 처리
+        return response
+    except Exception as e:
+        error = e
+        raise
+    finally:
         try:
-            # 응답 헤더 및 메타데이터만 처리
-            stream_metadata = {
-                'ResponseMetadata': response.get('ResponseMetadata', {}),
-                'contentType': response.get('contentType', ''),
-                'is_streaming': True
+            # 응답 정보 수집
+            response_info = {
+                'duration': time.time() - start_time,
+                'error': error,
+                'response': response
             }
             
-            # 스트리밍 이벤트 시작 시 기록
-            on_response({
-                'response': stream_metadata,
-                'response_error': None,
-                'duration': int((time.time() - start_time) * 1000),
-                'is_stream_start': True
-            })
-            
-            # 원래 응답을 그대로 반환
-            return response
-            
+            # 응답 처리
+            on_response(response_info)
         except Exception as e:
-            logger.error(f"Error processing streaming response metadata: {str(e)}")
-            return response
-            
-    except Exception as error:
-        try:
-            error_obj = create_error_from_exception(error)
-            on_response({
-                'response': None,
-                'response_error': error_obj,
-                'duration': int((time.time() - start_time) * 1000)
-            })
-        except Exception as e:
-            logger.error(f"Error processing streaming error response: {str(e)}")
-            
-        raise
+            logger.error(f"Streaming response monitoring error: {str(e)}")
 
 def _extract_request_from_args_kwargs(args, kwargs, original_func):
     """
-    함수 인자에서 요청 정보 추출
+    요청 정보 추출
     """
-    if not original_func:
-        return {}
-        
+    # 함수 시그니처 분석
+    sig = inspect.signature(original_func)
+    bound_args = sig.bind(*args, **kwargs)
+    bound_args.apply_defaults()
+    
+    # 요청 정보 추출
     request = {}
     
-    # 함수 파라미터 목록 가져오기
-    try:
-        signature = inspect.signature(original_func)
-        parameters = list(signature.parameters.keys())
-        
-        # 위치 인자 처리
-        for i, arg in enumerate(args):
-            if i < len(parameters):
-                param_name = parameters[i]
-                request[param_name] = arg
-        
-        # 키워드 인자 처리
-        for param_name, value in kwargs.items():
-            request[param_name] = value
-    except Exception as e:
-        logger.error(f"Error extracting request parameters: {str(e)}")
+    # modelId 추출
+    if 'modelId' in bound_args.arguments:
+        request['model_id'] = bound_args.arguments['modelId']
+    
+    # body 추출
+    if 'body' in bound_args.arguments:
+        body = bound_args.arguments['body']
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except json.JSONDecodeError:
+                pass
+        request['body'] = body
     
     return request
 
 def _parse_body(body):
     """
-    요청 또는 응답 본문 파싱
+    요청 본문 파싱
     """
-    if not body:
-        return {}
-        
-    if isinstance(body, bytes):
-        try:
-            body_str = body.decode('utf-8')
-            return json.loads(body_str)
-        except Exception:
-            return {'raw': str(body)}
-    elif isinstance(body, str):
+    if isinstance(body, str):
         try:
             return json.loads(body)
-        except Exception:
-            return {'raw': body}
-    elif isinstance(body, dict):
-        return body
-    else:
-        return {'raw': str(body)}
+        except json.JSONDecodeError:
+            return body
+    return body
 
 def _extract_response_data(response):
     """
-    응답에서 데이터 추출
+    응답 데이터 추출
     """
     if not response:
-        return {}
+        return None
         
-    response_data = {}
-    
-    if hasattr(response, 'get'):
-        # Dict-like response
-        response_data = response
-    else:
-        # API 응답 객체
-        for key in ['body', 'response', 'responseBody', 'ResponseMetadata', 'contentType', 'generation']:
-            if hasattr(response, key):
-                value = getattr(response, key)
-                response_data[key] = value
-
-    # body가 있는 경우 파싱
-    if 'body' in response_data:
-        try:
-            if isinstance(response_data['body'], (bytes, bytearray)):
-                body_str = response_data['body'].decode('utf-8')
-                response_data['parsed_body'] = json.loads(body_str)
-            elif isinstance(response_data['body'], str):
-                response_data['parsed_body'] = json.loads(response_data['body'])
-        except Exception as e:
-            logger.debug(f"Could not parse response body: {str(e)}")
-    
-    return response_data
+    try:
+        if hasattr(response, 'get'):
+            return response.get('body', None)
+        return response
+    except Exception as e:
+        logger.error(f"Response data extraction error: {str(e)}")
+        return None
 
 def _handle_invoke_model_response(
     request: Dict[str, Any],
@@ -500,31 +485,20 @@ def _handle_invoke_model_response(
     """
     try:
         # 응답 데이터 추출
-        response_data = _extract_response_data(response_info)
+        response_data = _extract_response_data(response_info['response'])
         
         # 이벤트 데이터 생성
-        event_data = factory.create_completion_event_data(
+        event_data = factory.create_event_data(
             request=request,
-            response=response_data
+            response=response_data,
+            duration=response_info['duration'],
+            error=response_info['error']
         )
         
-        # 피드백 수집이 활성화된 경우
-        if client._monitor_options.collect_feedback and client._monitor_options.feedback_callback:
-            feedback_data = client._monitor_options.feedback_callback(
-                request.get('input', ''),
-                response_data.get('output', '')
-            )
-            if feedback_data:
-                event_data.update({
-                    'feedback': feedback_data.get('feedback'),
-                    'sentiment': feedback_data.get('sentiment'),
-                    'feedback_message': feedback_data.get('feedback_message')
-                })
-        
         # 이벤트 전송
-        client._event_client.send_event(event_data)
+        client.send_event(event_data)
     except Exception as e:
-        logger.error(f"Error handling invoke_model response: {str(e)}")
+        logger.error(f"Invoke model response handling error: {str(e)}")
 
 def _handle_invoke_model_stream_response(
     request: Dict[str, Any],
@@ -535,42 +509,22 @@ def _handle_invoke_model_stream_response(
     """
     invoke_model_with_response_stream 응답 처리
     """
-    response = response_info.get('response')
-    response_error = response_info.get('response_error')
-    response_time = response_info.get('duration', 0)
-    is_stream_start = response_info.get('is_stream_start', False)
-    
-    # 요청 본문 파싱
-    request_body = request.get('body', {})
-    if isinstance(request_body, (bytes, str)):
-        request_body = _parse_body(request_body)
-    
-    # 응답 데이터 추출
-    response_data = {}
-    if response and (hasattr(response, 'get') or isinstance(response, dict)):
-        response_data = response if isinstance(response, dict) else dict(response)
-    
-    # 추가 메타 데이터
-    streaming_metadata = {
-        'is_streaming': True,
-        'stream_event_type': 'start' if is_stream_start else 'chunk'
-    }
-    
-    # 이벤트 데이터 생성
-    event_data = factory.create_event_data({
-        'request': {
-            **request,
-            'parsed_body': request_body,
-            **streaming_metadata
-        },
-        'response_data': response_data,
-        'response_time': response_time,
-        'response_error': response_error
-    })
-    
-    # 이벤트 전송
-    if event_data:
-        client.send(event_data)
+    try:
+        # 응답 데이터 추출
+        response_data = _extract_response_data(response_info['response'])
+        
+        # 이벤트 데이터 생성
+        event_data = factory.create_event_data(
+            request=request,
+            response=response_data,
+            duration=response_info['duration'],
+            error=response_info['error']
+        )
+        
+        # 이벤트 전송
+        client.send_event(event_data)
+    except Exception as e:
+        logger.error(f"Invoke model stream response handling error: {str(e)}")
 
 def _handle_converse_response(
     request: Dict[str, Any],
@@ -583,31 +537,20 @@ def _handle_converse_response(
     """
     try:
         # 응답 데이터 추출
-        response_data = _extract_response_data(response_info)
+        response_data = _extract_response_data(response_info['response'])
         
         # 이벤트 데이터 생성
-        event_data = factory.create_chat_completion_event_data(
+        event_data = factory.create_event_data(
             request=request,
-            response=response_data
+            response=response_data,
+            duration=response_info['duration'],
+            error=response_info['error']
         )
         
-        # 피드백 수집이 활성화된 경우
-        if client._monitor_options.collect_feedback and client._monitor_options.feedback_callback:
-            feedback_data = client._monitor_options.feedback_callback(
-                request.get('messages', []),
-                response_data.get('output', '')
-            )
-            if feedback_data:
-                event_data.update({
-                    'feedback': feedback_data.get('feedback'),
-                    'sentiment': feedback_data.get('sentiment'),
-                    'feedback_message': feedback_data.get('feedback_message')
-                })
-        
         # 이벤트 전송
-        client._event_client.send_event(event_data)
+        client.send_event(event_data)
     except Exception as e:
-        logger.error(f"Error handling converse response: {str(e)}")
+        logger.error(f"Converse response handling error: {str(e)}")
 
 def _handle_embedding_response(
     request: Dict[str, Any],
@@ -618,32 +561,22 @@ def _handle_embedding_response(
     """
     create_embedding 응답 처리
     """
-    response = response_info.get('response')
-    response_error = response_info.get('response_error')
-    response_time = response_info.get('duration', 0)
-    
-    # 요청 본문 파싱
-    request_body = request.get('body', {})
-    if isinstance(request_body, (bytes, str)):
-        request_body = _parse_body(request_body)
-    
-    # 응답 데이터 추출
-    response_data = _extract_response_data(response) if response else {}
-    
-    # 이벤트 데이터 생성
-    event_data = factory.create_event_data({
-        'request': {
-            **request,
-            'parsed_body': request_body
-        },
-        'response_data': response_data,
-        'response_time': response_time,
-        'response_error': response_error
-    })
-    
-    # 이벤트 전송
-    if event_data:
-        client.send(event_data)
+    try:
+        # 응답 데이터 추출
+        response_data = _extract_response_data(response_info['response'])
+        
+        # 이벤트 데이터 생성
+        event_data = factory.create_event_data(
+            request=request,
+            response=response_data,
+            duration=response_info['duration'],
+            error=response_info['error']
+        )
+        
+        # 이벤트 전송
+        client.send_event(event_data)
+    except Exception as e:
+        logger.error(f"Embedding response handling error: {str(e)}")
 
 def _handle_generate_with_model_response(
     request: Dict[str, Any],
@@ -652,43 +585,21 @@ def _handle_generate_with_model_response(
     client: Any
 ) -> None:
     """
-    generate_with_model 응답 처리 (RAG API)
+    generate_with_model 응답 처리
     """
-    response = response_info.get('response')
-    response_error = response_info.get('response_error')
-    response_time = response_info.get('duration', 0)
-    
-    # 요청 정보 처리
-    processed_request = {
-        **request,
-        'parsed_body': request.get('inferenceConfig', {}),
-        'modelId': request.get('modelId'),
-        'api_type': 'rag'
-    }
-    
-    # 응답 데이터 추출 및 처리
-    response_data = {}
-    if response:
-        # generation 필드가 있는 경우 응답 텍스트로 사용
-        if hasattr(response, 'generation'):
-            response_data['generation'] = response.generation
-            
-        # citations이 있는 경우 추가
-        if hasattr(response, 'citations'):
-            response_data['citations'] = response.citations
-            
-        # 메타데이터 추가
-        if hasattr(response, 'ResponseMetadata'):
-            response_data['ResponseMetadata'] = response.ResponseMetadata
-    
-    # 이벤트 데이터 생성
-    event_data = factory.create_event_data({
-        'request': processed_request,
-        'response_data': response_data,
-        'response_time': response_time,
-        'response_error': response_error
-    })
-    
-    # 이벤트 전송
-    if event_data:
-        client.send(event_data) 
+    try:
+        # 응답 데이터 추출
+        response_data = _extract_response_data(response_info['response'])
+        
+        # 이벤트 데이터 생성
+        event_data = factory.create_event_data(
+            request=request,
+            response=response_data,
+            duration=response_info['duration'],
+            error=response_info['error']
+        )
+        
+        # 이벤트 전송
+        client.send_event(event_data)
+    except Exception as e:
+        logger.error(f"Generate with model response handling error: {str(e)}") 
