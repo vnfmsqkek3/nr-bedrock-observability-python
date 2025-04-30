@@ -4,6 +4,14 @@
 
 AWS Bedrock API 호출을 위한 New Relic 관찰성 라이브러리입니다. 이 라이브러리를 사용하면 AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전송할 수 있습니다.
 
+## 최신 업데이트 (v1.1.2)
+
+- **트랜잭션 관리 개선**: Streamlit 환경에서 발생하는 "Attempt to save a trace from an inactive transaction" 오류 해결
+  - 각 API 호출 전에 현재 활성 트랜잭션 확인
+  - 활성 트랜잭션이 없는 경우에만 새 트랜잭션 생성
+  - 트랜잭션 시작과 종료를 명확하게 관리
+  - 예외 처리 강화
+
 ## 최신 업데이트 (v1.1.1)
 
 - Streamlit 환경에서의 New Relic 트랜잭션 관리 개선
