@@ -92,6 +92,94 @@ export AWS_SECRET_ACCESS_KEY=your_secret_key
 export AWS_REGION=us-east-1
 ```
 
+## RAG 워크플로우 트레이싱 개발
+
+이 라이브러리는 분산 트레이싱을 활용하여 OpenSearch 검색과 Bedrock 호출을 포함한 RAG 워크플로우를 하나의 트레이스로 연결하는 기능을 제공합니다.
+
+### 기술적 구현 방법
+
+RAG 워크플로우 트레이싱은 다음과 같이 구현되어 있습니다:
+
+1. 고유한 트레이스 ID 생성 (`uuid.uuid4()` 사용)
+2. New Relic 트랜잭션 생성 (`@newrelic.agent.background_task` 데코레이터 사용)
+3. 각 스팬에 동일한 트레이스 ID 공유 (`add_custom_span_attribute` 사용)
+4. FunctionTrace 컨텍스트 매니저를 사용한 스팬 생성
+
+```python
+# 트레이스 ID 생성 및 트랜잭션 시작
+trace_id = str(uuid.uuid4())
+transaction = newrelic.agent.current_transaction()
+transaction.add_custom_attribute('trace.id', trace_id)
+
+# 첫 번째 스팬 생성
+with newrelic.agent.FunctionTrace(name='span_name'):
+    newrelic.agent.add_custom_span_attribute('trace.id', trace_id)
+    # ... 작업 코드 ...
+
+# 두 번째 스팬 생성
+with newrelic.agent.FunctionTrace(name='another_span'):
+    newrelic.agent.add_custom_span_attribute('trace.id', trace_id)
+    # ... 작업 코드 ...
+```
+
+### 커스텀 함수 트레이스 확장
+
+보다 편리한 사용을 위해 `CustomFunctionTrace` 클래스를 구현했습니다:
+
+```python
+from newrelic.api.time_trace import TimeTrace
+
+class CustomFunctionTrace(TimeTrace):
+    def __init__(self, name, group='Custom', trace_id=None):
+        super(CustomFunctionTrace, self).__init__(name=name, group=group)
+        self.trace_id = trace_id
+        
+    def __enter__(self):
+        result = super(CustomFunctionTrace, self).__enter__()
+        
+        # 트레이스 ID가 제공된 경우 스팬에 추가
+        if self.trace_id:
+            newrelic.agent.add_custom_span_attribute('trace.id', self.trace_id)
+            
+        return result
+```
+
+### 샘플 코드 실행
+
+RAG 워크플로우 트레이싱 샘플 코드를 실행하려면:
+
+```bash
+# 필요한 패키지 설치
+pip install boto3 newrelic opensearch-py
+
+# 샘플 코드 실행
+python samples/rag_workflow_tracing.py
+```
+
+### 테스트 작성
+
+RAG 워크플로우 트레이싱 기능에 대한 테스트를 작성할 때는 다음 사항을 고려하세요:
+
+1. 모킹을 통해 AWS 서비스 호출 시뮬레이션
+2. New Relic 트랜잭션과 스팬이 올바르게 생성되는지 확인
+3. 트레이스 ID가 모든 스팬에 올바르게 전달되는지 검증
+
+```python
+def test_rag_workflow_tracing(mock_transaction, mock_bedrock_client, mock_opensearch_client):
+    # 테스트 코드...
+    assert 'trace.id' in captured_attributes
+    assert 'workflow.type' in captured_attributes
+    # ... 더 많은 검증 ...
+```
+
+### 디버깅 팁
+
+트레이싱 문제를 디버깅할 때 도움이 되는 팁:
+
+1. `logging.basicConfig(level=logging.DEBUG)`로 로그 레벨 설정
+2. New Relic UI에서 "Distributed Tracing" 메뉴를 확인하여 트레이스 연결 상태 확인
+3. `trace.id` 속성으로 검색하여 모든 관련 스팬이 올바르게 연결되었는지 확인
+
 ## PR 제출
 
 1. 기능 브랜치를 생성합니다.

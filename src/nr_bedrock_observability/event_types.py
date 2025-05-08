@@ -6,6 +6,11 @@ class EventType:
     LLM_CHAT_COMPLETION_SUMMARY = "LlmChatCompletionSummary"
     LLM_CHAT_COMPLETION_MESSAGE = "LlmChatCompletionMessage"
     LLM_EMBEDDING = "LlmEmbedding"
+    LLM_SYSTEM_PROMPT = "LlmSystemPrompt"
+    LLM_USER_PROMPT = "LlmUserPrompt"
+    LLM_OPENSEARCH_RESULT = "LlmOpenSearchResult"
+    LLM_RAG_CONTEXT = "LlmRagContext"
+    LLM_FEEDBACK = "LlmFeedback"
 
 # 이벤트 속성 (메타데이터) 타입
 EventAttributes = Dict[str, Union[str, int, float, bool, None]]
@@ -43,6 +48,69 @@ class ChatCompletionMessageAttributes(TypedDict, total=False):
     sequence: str
     model: str
     vendor: str  # 'bedrock'
+    prompt_type: Optional[str]
+    context_source: Optional[str]
+    trace_id: Optional[str]
+
+class SystemPromptAttributes(TypedDict, total=False):
+    """
+    시스템 프롬프트 속성
+    """
+    id: str
+    applicationName: str
+    content: str
+    model: str
+    vendor: str  # 'bedrock'
+    trace_id: Optional[str]
+    timestamp: int
+    completion_id: Optional[str]
+    parent_message_id: Optional[str]
+
+class UserPromptAttributes(TypedDict, total=False):
+    """
+    사용자 프롬프트 속성
+    """
+    id: str
+    applicationName: str
+    content: str
+    model: str
+    vendor: str  # 'bedrock'
+    trace_id: Optional[str]
+    timestamp: int
+    completion_id: Optional[str]
+    has_context: bool
+    parent_message_id: Optional[str]
+
+class OpenSearchResultAttributes(TypedDict, total=False):
+    """
+    OpenSearch 검색 결과 속성
+    """
+    id: str
+    applicationName: str
+    query: str
+    index_name: Optional[str]
+    result_content: str
+    result_title: Optional[str]
+    score: Optional[float]
+    sequence: Optional[int]
+    trace_id: Optional[str]
+    timestamp: int
+    total_results: Optional[int]
+    response_time: Optional[int]
+
+class RagContextAttributes(TypedDict, total=False):
+    """
+    RAG 컨텍스트 속성 (OpenSearch 결과를 LLM 컨텍스트로 변환)
+    """
+    id: str
+    applicationName: str
+    content: str
+    source: str
+    trace_id: Optional[str]
+    timestamp: int
+    completion_id: Optional[str]
+    prompt_id: Optional[str]
+    sequence: Optional[int]
 
 class ChatCompletionSummaryAttributes(TypedDict, total=False):
     """
@@ -68,6 +136,15 @@ class ChatCompletionSummaryAttributes(TypedDict, total=False):
     error_request_id: Optional[str]
     ingest_source: Optional[str]
     rate_limit_exceeded: Optional[bool]
+    has_system_prompt: bool
+    has_rag_context: bool
+    trace_id: Optional[str]
+    system_prompt_count: Optional[int]
+    user_prompt_count: Optional[int]
+    opensearch_result_count: Optional[int]
+    feedback: Optional[str]
+    sentiment: Optional[float]
+    feedback_message: Optional[str]
 
 class CommonSummaryAttributes:
     """
@@ -237,6 +314,19 @@ class BedrockModelMapping:
             return f"{vendor}.unknown"
             
         return model_id
+
+class FeedbackAttributes(TypedDict, total=False):
+    """
+    LLM 응답에 대한 사용자 피드백 속성
+    """
+    id: str
+    applicationName: str
+    feedback: str  # 'positive', 'negative', 'neutral'
+    sentiment: float  # -1.0부터 1.0 사이의 값
+    feedback_message: Optional[str]
+    trace_id: Optional[str]
+    completion_id: Optional[str]
+    timestamp: int
 
 # 에러 메시지에서 표준화된 오류 객체 생성
 def create_error_from_exception(error: Exception) -> BedrockError:

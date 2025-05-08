@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nr-bedrock-observability",
-    version="1.1.2",
+    version="1.3.0",
     description="New Relic observability for AWS Bedrock",
     author="New Relic",
     author_email="opensource@newrelic.com",
@@ -25,6 +25,9 @@ setup(
             "twine>=4.0.0",
             "build>=1.0.0",
         ],
+        "streamlit": [
+            "streamlit>=1.20.0"
+        ],
     },
     python_requires=">=3.8",
     classifiers=[
@@ -42,5 +45,5 @@ setup(
     ],
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    keywords=["aws", "bedrock", "observability", "monitoring", "llm", "newrelic", "telemetry"],
+    keywords=["aws", "bedrock", "observability", "monitoring", "llm", "newrelic", "telemetry", "streamlit"],
 ) 

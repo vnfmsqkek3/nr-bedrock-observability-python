@@ -4,12 +4,14 @@ import io  # 추가: 바이트 입출력을 위한 io 모듈
 from typing import Dict, Any, Optional, Union, Callable, TypeVar, cast, List
 import inspect
 import json
+import uuid
 
 from .events_client import create_event_client, EventClientOptions
 from .event_data_factory import (
     BedrockCompletionEventDataFactory,
     BedrockChatCompletionEventDataFactory,
-    BedrockEmbeddingEventDataFactory
+    BedrockEmbeddingEventDataFactory,
+    OpenSearchResultEventDataFactory
 )
 from .event_types import create_error_from_exception
 
@@ -28,7 +30,9 @@ class MonitorBedrockOptions:
         host: Optional[str] = None,
         port: Optional[int] = None,
         track_token_usage: bool = True,
-        disable_streaming_events: bool = False
+        disable_streaming_events: bool = False,
+        collect_feedback: bool = False,
+        feedback_callback: Optional[Callable] = None
     ):
         self.application_name = application_name
         self.new_relic_api_key = new_relic_api_key
@@ -36,6 +40,8 @@ class MonitorBedrockOptions:
         self.port = port
         self.track_token_usage = track_token_usage
         self.disable_streaming_events = disable_streaming_events
+        self.collect_feedback = collect_feedback
+        self.feedback_callback = feedback_callback
 
 def monitor_bedrock(
     bedrock_client: Any,
@@ -61,7 +67,9 @@ def monitor_bedrock(
             host=options.get('host'),
             port=options.get('port'),
             track_token_usage=options.get('track_token_usage', True),
-            disable_streaming_events=options.get('disable_streaming_events', False)
+            disable_streaming_events=options.get('disable_streaming_events', False),
+            collect_feedback=options.get('collect_feedback', False),
+            feedback_callback=options.get('feedback_callback')
         )
     else:
         monitor_options = options
@@ -95,6 +103,10 @@ def monitor_bedrock(
         'bedrock_configuration': bedrock_configuration
     })
     
+    opensearch_result_event_data_factory = OpenSearchResultEventDataFactory(
+        application_name=monitor_options.application_name
+    )
+    
     # 원본 메서드 저장
     original_invoke_model = bedrock_client.invoke_model
     original_invoke_model_with_response_stream = getattr(bedrock_client, 'invoke_model_with_response_stream', None)
@@ -112,6 +124,10 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_invoke_model)
             
+            # 트레이스 ID와 컨텍스트 데이터 추출 (RAG 워크플로우 연결용)
+            trace_id = request.pop('_trace_id', None) if isinstance(request, dict) else None
+            context_data = request.pop('_context_data', None) if isinstance(request, dict) else None
+            
             # 트랜잭션 관리
             try:
                 import newrelic.agent
@@ -119,6 +135,12 @@ def monitor_bedrock(
                 if app:
                     # 트랜잭션 시작
                     with newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/invoke_model"):
+                        # 트레이스 ID 설정 (있는 경우)
+                        if trace_id:
+                            newrelic.agent.add_custom_span_attribute('trace.id', trace_id)
+                            if context_data and 'user_query' in context_data:
+                                newrelic.agent.add_custom_span_attribute('user.query', context_data['user_query'])
+                        
                         # 응답 모니터링
                         return monitor_response(
                             lambda: invoke_model_func(*args, **kwargs),
@@ -126,7 +148,9 @@ def monitor_bedrock(
                                 request, 
                                 response_info, 
                                 completion_event_data_factory, 
-                                event_client
+                                event_client,
+                                trace_id,
+                                context_data
                             )
                         )
                 else:
@@ -143,7 +167,9 @@ def monitor_bedrock(
                     request, 
                     response_info, 
                     completion_event_data_factory, 
-                    event_client
+                    event_client,
+                    trace_id,
+                    context_data
                 )
             )
             
@@ -211,14 +237,52 @@ def monitor_bedrock(
             # 요청 정보 추출
             request = _extract_request_from_args_kwargs(args, kwargs, original_converse)
             
-            # 응답 모니터링
+            # 트레이스 ID와 컨텍스트 데이터 추출 (RAG 워크플로우 연결용)
+            trace_id = request.pop('_trace_id', None) if isinstance(request, dict) else None
+            context_data = request.pop('_context_data', None) if isinstance(request, dict) else None
+            
+            # 트랜잭션 관리
+            try:
+                import newrelic.agent
+                app = newrelic.agent.application()
+                if app:
+                    # 트랜잭션 시작
+                    with newrelic.agent.BackgroundTask(app, name=f"BedrockAPI/converse"):
+                        # 트레이스 ID 설정 (있는 경우)
+                        if trace_id:
+                            newrelic.agent.add_custom_span_attribute('trace.id', trace_id)
+                            if context_data and 'user_query' in context_data:
+                                newrelic.agent.add_custom_span_attribute('user.query', context_data['user_query'])
+                        
+                        # 응답 모니터링
+                        return monitor_response(
+                            lambda: converse_func(*args, **kwargs),
+                            lambda response_info: _handle_converse_response(
+                                request, 
+                                response_info, 
+                                chat_completion_event_data_factory, 
+                                event_client,
+                                trace_id,
+                                context_data
+                            )
+                        )
+                else:
+                    logger.warning("New Relic 애플리케이션을 찾을 수 없습니다. 트랜잭션 없이 진행합니다.")
+            except ImportError:
+                logger.debug("New Relic 에이전트를 임포트할 수 없습니다. 트랜잭션 없이 진행합니다.")
+            except Exception as e:
+                logger.error(f"트랜잭션 생성 중 오류: {str(e)}")
+            
+            # 트랜잭션 없이 진행 (에러 발생 또는 New Relic 없음)
             return monitor_response(
                 lambda: converse_func(*args, **kwargs),
                 lambda response_info: _handle_converse_response(
                     request, 
                     response_info, 
                     chat_completion_event_data_factory, 
-                    event_client
+                    event_client,
+                    trace_id,
+                    context_data
                 )
             )
             
@@ -512,7 +576,9 @@ def _handle_invoke_model_response(
     request: Dict[str, Any],
     response_info: Dict[str, Any],
     factory: BedrockCompletionEventDataFactory,
-    client: Any
+    client: Any,
+    trace_id: Optional[str] = None,
+    context_data: Optional[Dict[str, Any]] = None
 ) -> None:
     """
     invoke_model 응답 처리
@@ -537,7 +603,9 @@ def _handle_invoke_model_response(
         },
         'response_data': response_data,
         'response_time': response_time,
-        'response_error': response_error
+        'response_error': response_error,
+        'trace_id': trace_id,
+        'context_data': context_data
     })
     
     # 이벤트 전송
@@ -644,7 +712,9 @@ def _handle_converse_response(
     request: Dict[str, Any],
     response_info: Dict[str, Any],
     factory: BedrockChatCompletionEventDataFactory,
-    client: Any
+    client: Any,
+    trace_id: Optional[str] = None,
+    context_data: Optional[Dict[str, Any]] = None
 ) -> None:
     """
     converse 응답 처리
@@ -664,7 +734,9 @@ def _handle_converse_response(
         'request': request,
         'response_data': response_data,
         'response_time': response_time,
-        'response_error': response_error
+        'response_error': response_error,
+        'trace_id': trace_id,
+        'context_data': context_data
     })
     
     # 이벤트 전송
@@ -779,4 +851,134 @@ def _copy_streaming_body(body):
         return copy_for_monitoring, original_restored
     except Exception as e:
         logger.error(f"StreamingBody 복제 중 오류: {str(e)}")
-        return None, body 
+        return None, body
+
+# 새로운 함수: OpenSearch 검색 결과 모니터링
+def monitor_opensearch_results(
+    opensearch_client: Any,
+    query: str,
+    results: List[Dict[str, Any]],
+    application_name: str,
+    index_name: Optional[str] = None,
+    response_time: Optional[int] = None,
+    trace_id: Optional[str] = None
+) -> None:
+    """
+    OpenSearch 검색 결과 모니터링
+    
+    :param opensearch_client: OpenSearch 클라이언트
+    :param query: 검색 쿼리
+    :param results: 검색 결과 목록 (각 결과는 'content'와 'title' 키 포함)
+    :param application_name: 애플리케이션 이름
+    :param index_name: 검색한 인덱스 이름 (선택 사항)
+    :param response_time: 응답 시간 (밀리초)
+    :param trace_id: 트레이스 ID (분산 추적용)
+    """
+    # 결과 존재 확인
+    if not results:
+        logger.info("검색 결과가 없어 모니터링 건너뜀")
+        return
+    
+    try:
+        # 이벤트 팩토리 생성
+        factory = OpenSearchResultEventDataFactory(application_name=application_name)
+        
+        # 이벤트 데이터 생성
+        event_data_list = factory.create_event_data_list({
+            'query': query,
+            'results': results,
+            'index_name': index_name,
+            'response_time': response_time or 0,
+            'trace_id': trace_id,
+            'total_results': len(results)
+        })
+        
+        # New Relic에 직접 이벤트 기록
+        try:
+            import newrelic.agent
+            nr_app = newrelic.agent.application()
+            if nr_app:
+                for event_data in event_data_list:
+                    event_type = event_data.get('event_type')
+                    attributes = event_data.get('attributes', {})
+                    newrelic.agent.record_custom_event(event_type, attributes, application=nr_app)
+                logger.info(f"OpenSearch 결과 {len(event_data_list)}개 New Relic에 기록 성공")
+            else:
+                logger.warning("New Relic 애플리케이션을 찾을 수 없음, OpenSearch 결과 기록 건너뜀")
+        except ImportError:
+            logger.warning("New Relic을 임포트할 수 없음, OpenSearch 결과 기록 건너뜀")
+        except Exception as e:
+            logger.error(f"OpenSearch 결과 기록 중 오류: {str(e)}")
+    except Exception as e:
+        logger.error(f"OpenSearch 결과 모니터링 중 오류: {str(e)}")
+
+# 새로운 함수: RAG 워크플로우 컨텍스트 연결
+def link_rag_workflow(
+    user_query: str,
+    opensearch_results: List[Dict[str, Any]],
+    bedrock_client: Any,
+    bedrock_request: Dict[str, Any],
+    application_name: str,
+    trace_id: Optional[str] = None
+) -> str:
+    """
+    RAG 워크플로우의 컨텍스트를 연결 (OpenSearch 결과와 Bedrock 요청)
+    
+    :param user_query: 사용자 질문
+    :param opensearch_results: OpenSearch 검색 결과
+    :param bedrock_client: Bedrock 클라이언트
+    :param bedrock_request: Bedrock 요청 (invoke_model 또는 converse에 전달할 매개변수)
+    :param application_name: 애플리케이션 이름
+    :param trace_id: 트레이스 ID (없으면 생성)
+    :return: 트레이스 ID
+    """
+    # 트레이스 ID 생성 또는 사용
+    workflow_trace_id = trace_id or str(uuid.uuid4())
+    
+    try:
+        # 트레이스 정보 기록
+        import newrelic.agent
+        nr_app = newrelic.agent.application()
+        if nr_app:
+            # RAG 워크플로우 트레이스 설정
+            newrelic.agent.add_custom_span_attribute('rag.workflow', 'true')
+            newrelic.agent.add_custom_span_attribute('trace.id', workflow_trace_id)
+            newrelic.agent.add_custom_span_attribute('user.query', user_query)
+            
+            # 현재 트랜잭션에 워크플로우 정보 추가
+            current_transaction = newrelic.agent.current_transaction()
+            if current_transaction:
+                current_transaction.add_custom_attribute('workflow.type', 'rag')
+                current_transaction.add_custom_attribute('trace.id', workflow_trace_id)
+                current_transaction.add_custom_attribute('user.query', user_query)
+        
+        # OpenSearch 결과 모니터링
+        monitor_opensearch_results(
+            opensearch_client=None,  # 실제 클라이언트는 필요 없음 (결과만 사용)
+            query=user_query,
+            results=opensearch_results,
+            application_name=application_name,
+            trace_id=workflow_trace_id
+        )
+        
+        # 컨텍스트 데이터 구성
+        context_data = {
+            'opensearch_results': opensearch_results,
+            'user_query': user_query
+        }
+        
+        # Bedrock 요청에 트레이스 ID와 컨텍스트 추가
+        if 'modelId' in bedrock_request:
+            # Bedrock 클라이언트에 요청 설정
+            if 'messages' in bedrock_request:
+                # converse API 호출 준비
+                bedrock_request['_trace_id'] = workflow_trace_id
+                bedrock_request['_context_data'] = context_data
+            else:
+                # invoke_model API 호출 준비
+                bedrock_request['_trace_id'] = workflow_trace_id
+                bedrock_request['_context_data'] = context_data
+    except Exception as e:
+        logger.error(f"RAG 워크플로우 연결 중 오류: {str(e)}")
+    
+    return workflow_trace_id 
