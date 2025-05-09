@@ -1,5 +1,21 @@
 # 변경 이력
 
+## v2.0.0 (2024-06-30)
+
+### 주요 기능 추가
+
+- **Temperature, Top_P 파라미터 수집**: LLM 모델 호출 시 사용된 temperature와 top_p 파라미터 수집 기능 추가
+  - `LlmCompletion` 이벤트에 temperature와 top_p 필드 추가
+  - `LlmChatCompletionSummary` 이벤트에 temperature와 top_p 필드 추가
+  - `LlmUserResponseEvaluation` 이벤트에 temperature와 top_p 필드 추가
+  - 다양한 모델 및 API 호출 방식에 대응하여 파라미터 추출 로직 구현
+  - 모델별 기본값 처리 및 예외 상황 대응 로직 추가
+
+### 버전 변경 이유
+
+- API 응답 구조 변경에 따른 메이저 버전 업데이트
+- New Relic 대시보드에서 temperature와 top_p에 따른 성능 분석 기능 지원
+
 ## v1.7.3 (2024-06-28)
 
 ### 개선 사항

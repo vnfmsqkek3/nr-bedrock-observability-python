@@ -35,90 +35,85 @@ class BedrockCompletionEventDataFactory:
             
     def create_event_data(self, options: Dict[str, Any]) -> Optional[EventData]:
         """
-        Bedrock invoke_model 호출에 대한 이벤트 데이터 생성
-        
-        :param options: 이벤트 데이터 생성 옵션
-        :return: 이벤트 데이터 또는 None
+        이벤트 데이터 생성
         """
-        # 요청 및 응답 데이터 추출
         request = options.get('request', {})
         response_data = options.get('response_data', {})
         response_time = options.get('response_time', 0)
         response_error = options.get('response_error')
+        trace_id = options.get('trace_id')
+        context_data = options.get('context_data', {})
         
-        # 모델 ID 추출
-        model_id = self._extract_model_id(request)
-        if not model_id:
-            logger.warning("Model ID not found in request")
+        try:
+            # 모델 ID 추출
+            model_id = self._extract_model_id(request)
+
+            # 요청 본문 추출
+            request_body = self._extract_request_body(request)
+            
+            # 응답 본문 추출 
+            response_body = self._extract_response_body(response_data)
+            
+            # 입력 텍스트 추출
+            prompt = self._extract_prompt(request_body, model_id)
+            
+            # RAG 여부 확인
+            is_rag = False
+            if 'generate_with_model' in str(request).lower():
+                is_rag = True
+                
+            # 출력 텍스트 추출
+            completion = self._extract_completion_text(response_body, model_id, is_rag)
+            
+            # 완료 이유 추출
+            finish_reason = self._extract_finish_reason(response_body, model_id)
+            
+            # 공통 필수 속성 설정
+            attributes = {
+                'id': str(uuid.uuid4()),
+                'applicationName': self.application_name,
+                'request_model': model_id,
+                'response_model': model_id,  # 요청과 응답 모델이 동일
+                'response_time': response_time,
+                'timestamp': int(time.time() * 1000),
+                'vendor': 'bedrock',
+                'input': prompt,
+                'output': completion,
+                'finish_reason': finish_reason
+            }
+            
+            # API 버전 설정
+            if self.bedrock_configuration:
+                attributes['api_version'] = 'v2'
+                if 'region_name' in self.bedrock_configuration:
+                    attributes['region'] = self.bedrock_configuration['region_name']
+            
+            # 추가 속성 설정
+            if trace_id:
+                attributes['trace_id'] = trace_id
+                
+            # 컨텍스트 데이터 설정
+            if context_data:
+                if 'user_query' in context_data:
+                    attributes['user_query'] = context_data['user_query']
+                    
+            # 토큰 사용량 추가
+            self._add_token_usage(attributes, response_body, model_id)
+
+            # 온도와 top_p 파라미터 추가
+            self._add_model_parameters(attributes, request_body, model_id)
+            
+            # 에러 정보 추가 (있는 경우)
+            if response_error:
+                self._add_error_info(attributes, response_error)
+                
+            return {
+                'eventType': EventType.LLM_COMPLETION,
+                'attributes': attributes
+            }
+        except Exception as e:
+            logger.error(f"Error creating completion event data: {str(e)}")
             return None
-            
-        # 응답 및 요청 본문 처리
-        parsed_request_body = self._extract_request_body(request)
-        parsed_response_body = self._extract_response_body(response_data)
-        
-        # 스트리밍 호출 확인
-        is_streaming = request.get('is_streaming', False)
-        stream_event_type = request.get('stream_event_type', None)
-        
-        # RAG API 호출 확인
-        is_rag = request.get('api_type') == 'rag'
-        
-        # 완성 텍스트 추출
-        input_text = self._extract_prompt(parsed_request_body, model_id)
-        output_text = self._extract_completion_text(parsed_response_body, model_id, is_rag)
-        
-        # 고유 ID 생성
-        completion_id = str(uuid.uuid4())
-        
-        # 완성 속성 생성
-        attributes: CompletionAttributes = {
-            "id": completion_id,
-            "applicationName": self.application_name,
-            "request_model": model_id,
-            "response_model": BedrockModelMapping.normalize_model_id(model_id),
-            "response_time": response_time,
-            "timestamp": int(time.time() * 1000),
-            "vendor": "bedrock",
-            "input": input_text[:4095] if input_text else "",  # 길이 제한
-            "output": output_text[:4095] if output_text else "",  # 길이 제한
-            "ingest_source": "python-bedrock-sdk"
-        }
-        
-        # 스트리밍 관련 속성 추가
-        if is_streaming:
-            attributes["is_streaming"] = True
-            if stream_event_type:
-                attributes["stream_event_type"] = stream_event_type
-                
-        # RAG 관련 속성 추가
-        if is_rag:
-            attributes["api_type"] = "rag"
-            
-            # 인용 정보 추가
-            citations = response_data.get('citations', [])
-            if citations and isinstance(citations, list) and len(citations) > 0:
-                attributes["citation_count"] = len(citations)
-                
-        # AWS 리전 정보 추가
-        if self.bedrock_configuration and 'region_name' in self.bedrock_configuration:
-            attributes["region"] = self.bedrock_configuration['region_name']
-            
-        # 토큰 사용량 정보 추가
-        self._add_token_usage(attributes, parsed_response_body, model_id)
-        
-        # 오류 정보 추가
-        if response_error:
-            self._add_error_info(attributes, response_error)
-            
-        # 완료 이유 추가
-        finish_reason = self._extract_finish_reason(parsed_response_body, model_id)
-        if finish_reason:
-            attributes["finish_reason"] = finish_reason
-            
-        return {
-            "eventType": EventType.LLM_COMPLETION,
-            "attributes": attributes
-        }
         
     def _extract_model_id(self, request: Dict[str, Any]) -> str:
         """
@@ -546,3 +541,60 @@ class BedrockCompletionEventDataFactory:
             return response_body['stopReason']
             
         return None 
+
+    def _add_model_parameters(self, attributes: Dict[str, Any], request_body: Dict[str, Any], model_id: str) -> None:
+        """
+        모델 파라미터(temperature, top_p) 추가
+        """
+        model_id = model_id.lower()
+        
+        # Temperature 값 추출
+        temperature = None
+        if 'temperature' in request_body:
+            temperature = request_body.get('temperature')
+        elif 'params' in request_body and 'temperature' in request_body['params']:
+            temperature = request_body['params'].get('temperature')
+            
+        # Top_p 값 추출
+        top_p = None
+        if 'top_p' in request_body:
+            top_p = request_body.get('top_p')
+        elif 'topP' in request_body:
+            top_p = request_body.get('topP')
+        elif 'top-p' in request_body:
+            top_p = request_body.get('top-p')
+        elif 'params' in request_body:
+            if 'top_p' in request_body['params']:
+                top_p = request_body['params'].get('top_p')
+            elif 'topP' in request_body['params']:
+                top_p = request_body['params'].get('topP')
+            elif 'top-p' in request_body['params']:
+                top_p = request_body['params'].get('top-p')
+        
+        # 모델별 특수 파라미터 위치 처리
+        if 'anthropic.claude' in model_id:
+            if 'stopped_sequences' in request_body:
+                if 'temperature' not in request_body and 'temperature' not in attributes:
+                    attributes['temperature'] = 1.0  # 기본값
+            
+            # Claude는 기본적으로 top_p 값을 사용하지 않음
+            if top_p is None and 'top_p' not in attributes:
+                top_p = 1.0
+        
+        # Cohere 모델
+        elif 'cohere' in model_id:
+            if 'p' in request_body:
+                top_p = request_body.get('p')
+        
+        # 속성에 추가
+        if temperature is not None:
+            try:
+                attributes['temperature'] = float(temperature)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid temperature value: {temperature}")
+                
+        if top_p is not None:
+            try:
+                attributes['top_p'] = float(top_p)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid top_p value: {top_p}") 

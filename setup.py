@@ -10,7 +10,7 @@ def read_version():
 
 setup(
     name="nr-bedrock-observability",
-    version="1.7.3",
+    version="2.0.0",
     description="New Relic observability for AWS Bedrock",
     author="New Relic",
     author_email="czy1023@mz.co.kr",

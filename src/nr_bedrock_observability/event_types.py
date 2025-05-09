@@ -226,6 +226,8 @@ class CompletionAttributes(TypedDict, total=False):
     completion_tokens: Optional[int]
     prompt_tokens: Optional[int]
     total_tokens: Optional[int]
+    temperature: Optional[float]
+    top_p: Optional[float]
     error_status: Optional[str]
     error_message: Optional[str]
     error_type: Optional[str]
@@ -385,6 +387,8 @@ class UserResponseEvaluationAttributes(TypedDict, total=False):
     total_tokens: Optional[int]  # 총 토큰 수
     prompt_tokens: Optional[int]  # 프롬프트 토큰 수
     completion_tokens: Optional[int]  # 완성 토큰 수
+    temperature: Optional[float]
+    top_p: Optional[float]
     
     # 내부 태깅
     evaluation_source: Optional[str]  # 평가 출처 (예: 'streamlit', 'api', 'cli')

@@ -2,9 +2,15 @@
 
 AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전송하는 라이브러리입니다.
 
-## 최신 업데이트 (v1.5.0)
+## 최신 업데이트 (v2.0.0)
 
-- **Bedrock 지식 기반 및 LangChain 모니터링 기능 추가**:
+- **Temperature, Top_P 파라미터 수집 기능 추가**:
+  - LLM 모델 호출 시 사용된 temperature와 top_p 파라미터 자동 수집
+  - 모든 이벤트 타입(`LlmCompletion`, `LlmChatCompletionSummary`, `LlmUserResponseEvaluation`)에 파라미터 데이터 추가
+  - 모델별 온도 및 top_p 값에 따른 성능 분석 가능
+  - New Relic 대시보드에서 파라미터 값에 따른 응답 품질 상관관계 분석 지원
+
+- **Bedrock 지식 기반 및 LangChain 모니터링 기능**:
   - Bedrock 지식 기반 API 호출 모니터링
   - 지식 기반 ID, 이름 및 메타데이터 수집
   - LangChain 통합 및 모니터링 지원
@@ -17,6 +23,22 @@ AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전�
   - Claude 3.5 Sonnet v2 최신 버전(anthropic.claude-3-5-sonnet-20241022-v2:0) 지원
 
 ## 업데이트 히스토리
+
+### v2.0.0
+- LLM 모델 파라미터(temperature, top_p) 수집 기능 추가
+- 모든 이벤트 타입에 파라미터 데이터 필드 추가
+- 파라미터에 따른 응답 품질 상관관계 분석 지원
+- 다양한 모델 및 API 호출 방식에 대응하는 파라미터 추출 로직 구현
+
+### v1.7.3
+- 대시보드 헬퍼 기능 개선
+- 토큰 사용량 분석 쿼리 개선 및 가시성 향상
+- 시간 범위 조정 및 데이터 접근성 개선
+
+### v1.7.2
+- Claude 3.5 토큰 추출 기능 개선
+- 다양한 응답 구조에서 토큰 정보 안정적 추출
+- 코드 중복 제거 및 유지 관리성 향상
 
 ### v1.5.0
 - Bedrock 지식 기반 모니터링 추가
@@ -203,6 +225,28 @@ FROM LlmUserResponseEvaluation SELECT
   average(coherence_score) as '일관성',
   average(helpfulness_score) as '유용성'
 FACET model_id SINCE 2 weeks ago
+
+-- Temperature와 Top_P 파라미터에 따른 모델 성능 분석
+FROM LlmUserResponseEvaluation SELECT 
+  average(overall_score) as '평균 만족도'
+FACET model_id, temperature WHERE temperature IS NOT NULL SINCE 1 week ago
+
+-- Temperature 값에 따른 응답 품질 산점도
+FROM LlmCompletion SELECT 
+  temperature as 'Temperature', 
+  response_time as '응답 시간(ms)'
+WHERE temperature IS NOT NULL SINCE 1 week ago LIMIT 500
+
+-- Top_P 값에 따른 토큰 사용량 상관관계
+FROM LlmCompletion SELECT 
+  top_p as 'Top_P', 
+  prompt_tokens + completion_tokens as '총 토큰'
+WHERE top_p IS NOT NULL AND prompt_tokens IS NOT NULL AND completion_tokens IS NOT NULL 
+SINCE 1 day ago LIMIT 1000
+
+-- Temperature/Top_P 값 분포 확인
+FROM LlmCompletion SELECT histogram(temperature, 10) WHERE temperature IS NOT NULL SINCE 1 day ago
+FROM LlmCompletion SELECT histogram(top_p, 10) WHERE top_p IS NOT NULL SINCE 1 day ago
 ```
 
 ### 지식 기반 및 LangChain 분석 쿼리

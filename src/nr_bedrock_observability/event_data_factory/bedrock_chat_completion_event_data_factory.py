@@ -362,10 +362,65 @@ class BedrockChatCompletionEventDataFactory:
             if 'outputTokenCount' in usage:
                 attributes['output_token_count'] = usage['outputTokenCount']
         
+        # 모델 파라미터(temperature, top_p) 추가
+        self._add_model_parameters(attributes, request)
+        
         return EventData(
             event_type=EventType.LLM_CHAT_COMPLETION_SUMMARY,
             attributes=attributes
         )
+    
+    def _add_model_parameters(self, attributes: Dict[str, Any], request: Dict[str, Any]) -> None:
+        """
+        모델 파라미터(temperature, top_p) 추가
+        """
+        # body 추출
+        body = {}
+        if 'body' in request:
+            req_body = request['body']
+            if isinstance(req_body, dict):
+                body = req_body
+            elif isinstance(req_body, str):
+                try:
+                    body = json.loads(req_body)
+                except json.JSONDecodeError:
+                    pass
+            elif isinstance(req_body, bytes):
+                try:
+                    body = json.loads(req_body.decode('utf-8'))
+                except json.JSONDecodeError:
+                    pass
+        
+        # Temperature 값 추출
+        temperature = None
+        if 'temperature' in request:
+            temperature = request.get('temperature')
+        elif 'temperature' in body:
+            temperature = body.get('temperature')
+        
+        # Top_p 값 추출
+        top_p = None
+        if 'top_p' in request:
+            top_p = request.get('top_p')
+        elif 'topP' in request:
+            top_p = request.get('topP')
+        elif 'top_p' in body:
+            top_p = body.get('top_p')
+        elif 'topP' in body:
+            top_p = body.get('topP')
+        
+        # 속성에 추가
+        if temperature is not None:
+            try:
+                attributes['temperature'] = float(temperature)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid temperature value: {temperature}")
+                
+        if top_p is not None:
+            try:
+                attributes['top_p'] = float(top_p)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid top_p value: {top_p}")
     
     def _get_messages(self, request: Dict[str, Any], response_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
