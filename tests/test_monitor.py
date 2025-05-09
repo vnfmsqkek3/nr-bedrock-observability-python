@@ -7,7 +7,7 @@ import copy
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src import monitor_bedrock
+from src.nr_bedrock_observability import monitor_bedrock
 
 # 환경 변수로 설정 (코드에 직접 입력하지 않음)
 os.environ["AWS_ACCESS_KEY_ID"] = "YOUR_ACCESS_KEY"  # 실행 시 직접 입력하세요
@@ -59,7 +59,7 @@ class TestMonitorBedrock:
         with pytest.raises(ValueError, match="Bedrock client is missing"):
             monitor_bedrock(None, {'application_name': 'TestApp'})
             
-    @patch('src.monitor.create_event_client')
+    @patch('src.nr_bedrock_observability.monitor.create_event_client')
     def test_monitor_bedrock_creates_event_client(self, mock_create_event_client):
         # Create mock objects
         mock_client = MagicMock()

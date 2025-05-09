@@ -29,7 +29,9 @@ def get_bedrock_client(region_name='ap-northeast-2'):
 # 커스텀 함수 트레이스를 위한 컨텍스트 매니저
 class CustomFunctionTrace(TimeTrace):
     def __init__(self, name, group='Custom', trace_id=None):
-        super(CustomFunctionTrace, self).__init__(name=name, group=group)
+        # TimeTrace.__init__()는 name을 파라미터로 받지 않고 생성자 내에서 설정함
+        super(CustomFunctionTrace, self).__init__(group=group)
+        self.name = name
         self.trace_id = trace_id
         
     def __enter__(self):

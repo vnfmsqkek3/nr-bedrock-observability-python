@@ -15,10 +15,7 @@ from .generic_response_evaluation import (
     get_evaluation_collector,
     reset_evaluation_collector,
     send_evaluation,
-    send_evaluation_with_newrelic_agent,
-    init_evaluation_collector,
-    update_evaluation_collector,
-    submit_evaluation
+    send_evaluation_with_newrelic_agent
 )
 
 # Streamlit 평가 수집 도구 import
@@ -32,7 +29,7 @@ from .streamlit_response_evaluation import (
 )
 
 # 새로 추가한 대시보드 헬퍼 함수들을 노출
-from nr_bedrock_observability.bedrock_dashboard_helpers import (
+from .bedrock_dashboard_helpers import (
     record_role_based_events,
     record_search_results,
     record_bedrock_response,
@@ -42,7 +39,7 @@ from nr_bedrock_observability.bedrock_dashboard_helpers import (
 )
 
 # 패키지 버전 정보
-__version__ = "1.7.1"
+__version__ = "1.7.2"
 
 # 공개 API
 __all__ = [
