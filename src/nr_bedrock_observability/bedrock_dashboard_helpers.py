@@ -285,12 +285,11 @@ def get_sample_nrql_queries(trace_id=None, completion_id=None, conversation_id=N
         "토큰_사용량_분석": f"""
         # 토큰 사용량과 만족도 상관관계
         FROM LlmUserResponseEvaluation SELECT 
-          average(overall_score) AS '평균 만족도',
-          sum(prompt_tokens + completion_tokens) / uniqueCount(trace_id) AS '평균 총 토큰'
-        FACET range(prompt_tokens + completion_tokens, 1000, 2000, 3000, 4000) AS '토큰 사용량 구간'
+        prompt_tokens + completion_tokens AS '총 토큰',
+        overall_score AS '만족도'
         WHERE prompt_tokens IS NOT NULL AND completion_tokens IS NOT NULL
-        SINCE 1 MONTH AGO
-        LIMIT MAX
+        SINCE 1 hour AGO
+        LIMIT 1000
         """,
         
         "토큰_필드_확인": f"""
@@ -300,7 +299,7 @@ def get_sample_nrql_queries(trace_id=None, completion_id=None, conversation_id=N
           percentage(count(*), WHERE total_tokens IS NOT NULL) AS '총 토큰 정보 있음',
           percentage(count(*), WHERE completion_tokens IS NOT NULL) AS '완성 토큰 정보 있음',
           percentage(count(*), WHERE prompt_tokens IS NOT NULL) AS '프롬프트 토큰 정보 있음'
-        SINCE 1 MONTH AGO
+        SINCE 1 hour AGO
         """,
         
         "모델별_토큰_사용량": f"""
@@ -312,7 +311,7 @@ def get_sample_nrql_queries(trace_id=None, completion_id=None, conversation_id=N
           sum(prompt_tokens + completion_tokens) / uniqueCount(trace_id) AS '대화당 평균 토큰'
         FACET model_id, kb_id
         WHERE prompt_tokens IS NOT NULL AND completion_tokens IS NOT NULL
-        SINCE 1 MONTH AGO
+        SINCE 1 hour AGO
         LIMIT MAX
         """
     }
@@ -324,17 +323,17 @@ def get_sample_nrql_queries(trace_id=None, completion_id=None, conversation_id=N
         FROM {EVENT_TYPE_SYSTEM_PROMPT} SELECT *
         WHERE conversation_id = '{conversation_id}'
         ORDER BY message_index ASC
-        SINCE 1 WEEK AGO
+        SINCE 1 hour AGO
 
         FROM {EVENT_TYPE_USER_PROMPT} SELECT *
         WHERE conversation_id = '{conversation_id}'
         ORDER BY message_index ASC
-        SINCE 1 WEEK AGO
+        SINCE 1 hour AGO
 
         FROM {EVENT_TYPE_RAG_CONTEXT} SELECT *
         WHERE conversation_id = '{conversation_id}'
         ORDER BY message_index ASC
-        SINCE 1 WEEK AGO
+        SINCE 1 hour AGO
         """
     
     if completion_id:
@@ -342,12 +341,12 @@ def get_sample_nrql_queries(trace_id=None, completion_id=None, conversation_id=N
         # 특정 완성 ID의 모델 평가 이벤트 조회
         FROM LlmUserResponseEvaluation SELECT *
         WHERE completion_id = '{completion_id}'
-        SINCE 1 WEEK AGO
+        SINCE 1 hour AGO
         
         # 특정 완성 ID의 Bedrock 응답 조회
         FROM {EVENT_TYPE_LLM_RESPONSE} SELECT *
         WHERE completion_id = '{completion_id}'
-        SINCE 1 WEEK AGO
+        SINCE 1 hour AGO
         """
     
     if kb_id:
@@ -356,13 +355,13 @@ def get_sample_nrql_queries(trace_id=None, completion_id=None, conversation_id=N
         FROM LlmUserResponseEvaluation SELECT *
         WHERE kb_id = '{kb_id}'
         ORDER BY timestamp DESC
-        SINCE 1 WEEK AGO
+        SINCE 1 hour AGO
 
         # 모델 ID와 지식 기반 ID별 평가 이벤트 수 조회
         FROM LlmUserResponseEvaluation SELECT count(*) 
         FACET model_id, kb_id 
         WHERE kb_id IS NOT NULL
-        SINCE 1 MONTH AGO
+        SINCE 1 hour AGO
         """
     
     return queries

@@ -39,7 +39,7 @@ from .bedrock_dashboard_helpers import (
 )
 
 # 패키지 버전 정보
-__version__ = "1.7.2"
+__version__ = "1.7.3"
 
 # 공개 API
 __all__ = [
