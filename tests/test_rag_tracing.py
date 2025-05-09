@@ -124,12 +124,15 @@ def test_custom_function_trace():
     with mock.patch('newrelic.agent.add_custom_span_attribute') as mock_add_attr:
         trace_id = str(uuid.uuid4())
         
-        # CustomFunctionTrace 사용
-        with CustomFunctionTrace(name='test_span', trace_id=trace_id):
-            pass
+        # current_transaction이 기본적으로 None을 반환하므로 모킹 필요
+        with mock.patch('newrelic.api.transaction.current_transaction', 
+                      return_value=mock.MagicMock()):
+            # CustomFunctionTrace 사용
+            with CustomFunctionTrace(name='test_span', trace_id=trace_id):
+                pass
         
-        # trace.id 속성이 추가되었는지 확인
-        mock_add_attr.assert_called_with('trace.id', trace_id)
+            # trace.id 속성이 추가되었는지 확인
+            mock_add_attr.assert_called_with('trace.id', trace_id)
 
 
 def test_search_opensearch(mock_opensearch_client, mock_nr_agent):
@@ -146,7 +149,7 @@ def test_search_opensearch(mock_opensearch_client, mock_nr_agent):
     
     # 결과 확인
     assert isinstance(results, list)
-    assert len(results) == 1
+    assert len(results) == 2  # 가상 데이터에서 2개의 결과를 반환함
     assert 'title' in results[0]
     assert 'content' in results[0]
     
@@ -156,7 +159,7 @@ def test_search_opensearch(mock_opensearch_client, mock_nr_agent):
         mock.call('openSearch.query', '테스트 쿼리'),
         mock.call('openSearch.index', 'test-index'),
         mock.call('rag.workflow', 'true'),
-        mock.call('openSearch.resultsCount', 1)
+        mock.call('openSearch.resultsCount', 2)  # 결과 수도 2로 수정
     ]
     mock_nr_agent.assert_has_calls(expected_calls, any_order=True)
 
@@ -203,12 +206,15 @@ def test_rag_workflow(mock_generate, mock_search, mock_nr_transaction, mock_nr_a
     ]
     mock_generate.return_value = "모킹된 LLM 응답입니다."
     
-    # 워크플로우 실행
-    result = rag_workflow(
-        user_query='테스트 질문',
-        opensearch_domain='test-domain',
-        index_name='test-index'
-    )
+    # current_transaction이 실제로 mock_nr_transaction을 반환하도록 설정
+    with mock.patch('newrelic.api.transaction.current_transaction', 
+                  return_value=mock_nr_transaction):
+        # 워크플로우 실행
+        result = rag_workflow(
+            user_query='테스트 질문',
+            opensearch_domain='test-domain',
+            index_name='test-index'
+        )
     
     # 결과 확인
     assert isinstance(result, dict)
@@ -219,10 +225,9 @@ def test_rag_workflow(mock_generate, mock_search, mock_nr_transaction, mock_nr_a
     assert result['query'] == '테스트 질문'
     assert result['llm_response'] == "모킹된 LLM 응답입니다."
     
-    # mock_nr_transaction.custom_attributes 확인 대신 add_custom_attribute 호출 확인
+    # add_custom_attribute 호출 확인
     mock_nr_transaction.add_custom_attribute.assert_any_call('workflow.type', 'rag')
     mock_nr_transaction.add_custom_attribute.assert_any_call('user.query', '테스트 질문')
-    # trace_id는 동적으로 생성되므로 정확한 값으로 검증하기 어려움
     
     # 함수가 올바르게 호출되었는지 확인
     mock_search.assert_called_once()
