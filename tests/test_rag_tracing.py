@@ -219,12 +219,10 @@ def test_rag_workflow(mock_generate, mock_search, mock_nr_transaction, mock_nr_a
     assert result['query'] == '테스트 질문'
     assert result['llm_response'] == "모킹된 LLM 응답입니다."
     
-    # 직접 add_custom_attribute 호출 여부 확인 대신
-    # 속성이 추가되었는지 확인
-    assert 'workflow.type' in mock_nr_transaction.custom_attributes
-    assert mock_nr_transaction.custom_attributes['workflow.type'] == 'rag'
-    assert 'user.query' in mock_nr_transaction.custom_attributes
-    assert mock_nr_transaction.custom_attributes['user.query'] == '테스트 질문'
+    # mock_nr_transaction.custom_attributes 확인 대신 add_custom_attribute 호출 확인
+    mock_nr_transaction.add_custom_attribute.assert_any_call('workflow.type', 'rag')
+    mock_nr_transaction.add_custom_attribute.assert_any_call('user.query', '테스트 질문')
+    # trace_id는 동적으로 생성되므로 정확한 값으로 검증하기 어려움
     
     # 함수가 올바르게 호출되었는지 확인
     mock_search.assert_called_once()
