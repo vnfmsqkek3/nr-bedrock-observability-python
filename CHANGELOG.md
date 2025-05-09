@@ -1,5 +1,20 @@
 # 변경 이력
 
+## v2.0.2 (2024-07-02)
+
+### 개선 사항
+
+- **Streamlit 평가 UI 개선**: 
+  - `create_evaluation_ui()` 함수에 temperature와 top_p 파라미터 추가
+  - 평가 UI에서 모델 파라미터(temperature, top_p) 정보를 포함하여 전송하도록 개선
+  - `create_evaluation_debug_ui()` 함수에서 테스트 평가 전송 시 파라미터 지원
+
+### 호환성 개선
+
+- **평가 데이터 수집 도구 호환성 개선**:
+  - `send_evaluation_with_newrelic_agent()` 함수에 temperature와 top_p 파라미터 명시적 지원
+  - API 호출 시 파라미터를 쉽게 전달할 수 있도록 인터페이스 개선
+
 ## v2.0.1 (2024-07-01)
 
 ### 버그 수정

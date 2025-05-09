@@ -101,6 +101,8 @@ def send_evaluation(
     total_tokens: Optional[int] = None,
     prompt_tokens: Optional[int] = None,
     completion_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
     evaluation_source: Optional[str] = None,
     collector_id: str = "default"
 ) -> Dict[str, Any]:
@@ -136,6 +138,8 @@ def send_evaluation(
     :param total_tokens: 총 토큰 수
     :param prompt_tokens: 프롬프트 토큰 수
     :param completion_tokens: 완성 토큰 수
+    :param temperature: 모델 temperature 값
+    :param top_p: 모델 top_p 값
     :param evaluation_source: 평가 출처 (streamlit, api, cli 등)
     :param collector_id: 사용할 평가 수집기 ID
     :return: 기록된 평가 이벤트 데이터 (dictionary)
@@ -190,6 +194,8 @@ def send_evaluation(
             total_tokens=total_tokens,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            temperature=temperature,
+            top_p=top_p,
             evaluation_source=evaluation_source
         )
         
@@ -206,6 +212,8 @@ def send_evaluation_with_newrelic_agent(
     application_name: str,
     trace_id: Optional[str] = None,
     completion_id: Optional[str] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -219,6 +227,8 @@ def send_evaluation_with_newrelic_agent(
     :param application_name: 애플리케이션 이름
     :param trace_id: 트레이스 ID (없으면 자동 생성)
     :param completion_id: 완성 ID (없으면 트레이스 ID 사용)
+    :param temperature: 모델 temperature 값
+    :param top_p: 모델 top_p 값
     :param kwargs: record_evaluation 메소드에 전달할 추가 인수
     :return: 기록된 평가 이벤트 데이터 (dictionary)
     """
@@ -244,6 +254,12 @@ def send_evaluation_with_newrelic_agent(
             "model_id": model_id,
             "overall_score": overall_score
         }
+        
+        # temperature와 top_p 속성 추가
+        if temperature is not None:
+            attributes["temperature"] = temperature
+        if top_p is not None:
+            attributes["top_p"] = top_p
         
         # kwargs에서 추가 속성 가져오기
         for key, value in kwargs.items():

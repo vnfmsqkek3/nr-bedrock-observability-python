@@ -136,6 +136,8 @@ def create_evaluation_ui(
     total_tokens: Optional[int] = None,
     prompt_tokens: Optional[int] = None,
     completion_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
     application_name: Optional[str] = None,
     collector_session_key: str = "response_evaluation_collector",
     use_number_input: bool = True,
@@ -157,6 +159,8 @@ def create_evaluation_ui(
     :param total_tokens: 총 토큰 수
     :param prompt_tokens: 프롬프트 토큰 수
     :param completion_tokens: 완성 토큰 수
+    :param temperature: 모델 temperature 값
+    :param top_p: 모델 top_p 값
     :param application_name: 애플리케이션 이름
     :param collector_session_key: 세션 상태에서 수집기를 저장할 키
     :param use_number_input: 슬라이더 대신 숫자 입력 사용 여부
@@ -338,6 +342,8 @@ def create_evaluation_ui(
                         total_tokens=total_tokens,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
                         evaluation_source=evaluation_source
                     )
                 # 옵션 2: generic_response_evaluation 모듈의 함수 사용
@@ -364,6 +370,8 @@ def create_evaluation_ui(
                         total_tokens=total_tokens,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
                         evaluation_source=evaluation_source
                     )
                 

@@ -76,6 +76,8 @@ class ResponseEvaluationCollector:
         total_tokens: Optional[int] = None,
         prompt_tokens: Optional[int] = None,
         completion_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
         evaluation_source: Optional[str] = None,
         evaluator_type: Optional[str] = "end-user"
     ) -> Dict[str, Any]:
@@ -111,6 +113,8 @@ class ResponseEvaluationCollector:
         :param total_tokens: 총 토큰 수
         :param prompt_tokens: 프롬프트 토큰 수
         :param completion_tokens: 완성 토큰 수
+        :param temperature: 모델 temperature 값
+        :param top_p: 모델 top_p 값
         :param evaluation_source: 평가 출처 (streamlit, api, cli 등)
         :param evaluator_type: 평가자 타입 (end-user, expert, developer 등)
         :return: 기록된 평가 데이터
@@ -200,6 +204,8 @@ class ResponseEvaluationCollector:
             "total_tokens": total_tokens,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
             "evaluation_source": evaluation_source,
             "evaluator_type": evaluator_type
         }
