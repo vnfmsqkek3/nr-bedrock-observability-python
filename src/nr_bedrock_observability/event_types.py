@@ -16,8 +16,8 @@ class EventType:
 # 이벤트 속성 (메타데이터) 타입
 EventAttributes = Dict[str, Union[str, int, float, bool, None]]
 
-# 이벤트 데이터 타입
-EventData = Dict[str, Any]
+# 이벤트 데이터 타입 - Dict 타입 힌트와 함께 주석 추가
+EventData = Dict[str, Any]  # {"eventType": str, "attributes": EventAttributes}
 
 class BedrockError:
     """

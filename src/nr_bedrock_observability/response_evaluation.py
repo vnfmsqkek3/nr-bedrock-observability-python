@@ -210,11 +210,11 @@ class ResponseEvaluationCollector:
                 attributes[key] = value
         
         try:
-            # 이벤트 데이터 생성
-            event_data = EventData(
-                event_type=EventType.LLM_USER_RESPONSE_EVALUATION,
-                attributes=attributes
-            )
+            # 이벤트 데이터 생성 - EventData 타입 힌트를 실제 dict 객체로 변경
+            event_data = {
+                "eventType": EventType.LLM_USER_RESPONSE_EVALUATION,
+                "attributes": attributes
+            }
             
             # 이벤트 전송 (이벤트 클라이언트 또는 New Relic 에이전트 사용)
             if self.event_client:

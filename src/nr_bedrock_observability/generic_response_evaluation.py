@@ -250,18 +250,28 @@ def send_evaluation_with_newrelic_agent(
             if value is not None:
                 attributes[key] = value
         
-        # New Relic 에이전트를 사용하여 직접 이벤트 기록
-        nr_app = newrelic.agent.application()
-        if nr_app:
-            newrelic.agent.record_custom_event(
-                EventType.LLM_USER_RESPONSE_EVALUATION, 
-                attributes,
-                application=nr_app
-            )
-            logger.info(f"모델 평가 이벤트가 New Relic에 기록되었습니다 (ID: {attributes['id']})")
-        else:
-            logger.warning("New Relic 애플리케이션을 찾을 수 없습니다. 평가를 전송할 수 없습니다.")
-            return None
+        # New Relic 에이전트를 통해 이벤트 기록
+        try:
+            nr_app = newrelic.agent.application()
+            if nr_app:
+                # 백그라운드 트랜잭션으로 이벤트 기록
+                with newrelic.agent.BackgroundTask(nr_app, name="RecordLlmEvaluation"):
+                    newrelic.agent.record_custom_event(
+                        EventType.LLM_USER_RESPONSE_EVALUATION, 
+                        attributes,
+                        application=nr_app
+                    )
+                    logger.info("모델 평가 이벤트를 New Relic에 직접 기록했습니다")
+            else:
+                # 애플리케이션 없이 기본 방식으로 기록
+                newrelic.agent.record_custom_event(
+                    EventType.LLM_USER_RESPONSE_EVALUATION, 
+                    attributes
+                )
+                logger.info("기본 방식으로 모델 평가 이벤트를 New Relic에 기록했습니다")
+        except Exception as e:
+            logger.error(f"New Relic에 모델 평가 이벤트 기록 중 오류: {str(e)}")
+            raise
         
         return attributes
         
