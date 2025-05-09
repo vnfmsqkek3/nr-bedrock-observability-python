@@ -186,7 +186,9 @@ def record_bedrock_response(
     kb_name=None,
     conversation_id=None,
     message_index=0,
-    response_time_ms=0
+    response_time_ms=0,
+    temperature=None,
+    top_p=None
 ):
     """
     Bedrock API 응답 데이터를 New Relic에 기록
@@ -202,6 +204,8 @@ def record_bedrock_response(
     :param conversation_id: 대화 ID
     :param message_index: 메시지 인덱스
     :param response_time_ms: 응답 시간 (ms)
+    :param temperature: 모델 temperature 값
+    :param top_p: 모델 top_p 값
     :return: 기록 성공 여부
     """
     try:
@@ -245,6 +249,19 @@ def record_bedrock_response(
             "kb_used_in_query": True if kb_id else False,
             "response_time_ms": response_time_ms
         }
+        
+        # temperature와 top_p 값이 있으면 이벤트에 추가
+        if temperature is not None:
+            try:
+                llm_response_event['temperature'] = float(temperature)
+            except (ValueError, TypeError):
+                pass
+                
+        if top_p is not None:
+            try:
+                llm_response_event['top_p'] = float(top_p)
+            except (ValueError, TypeError):
+                pass
         
         # 이벤트 기록
         with newrelic.agent.BackgroundTask(nr_app, name=f"EventRecording/LlmResponse"):
