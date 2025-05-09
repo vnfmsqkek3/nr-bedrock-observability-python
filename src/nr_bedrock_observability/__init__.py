@@ -3,7 +3,7 @@ New Relic AWS Bedrock 모니터링 라이브러리
 """
 
 # 모듈을 직접 import하면 monitor_bedrock 함수 사용 가능
-from .monitor import monitor_bedrock, monitor_opensearch_results, link_rag_workflow
+from .monitor import monitor_bedrock, monitor_opensearch_results, link_rag_workflow, MonitorBedrockOptions
 from .response_evaluation import (
     ResponseEvaluationCollector, 
     create_response_evaluation_collector
@@ -15,7 +15,10 @@ from .generic_response_evaluation import (
     get_evaluation_collector,
     reset_evaluation_collector,
     send_evaluation,
-    send_evaluation_with_newrelic_agent
+    send_evaluation_with_newrelic_agent,
+    init_evaluation_collector,
+    update_evaluation_collector,
+    submit_evaluation
 )
 
 # Streamlit 평가 수집 도구 import
@@ -26,6 +29,16 @@ from .streamlit_response_evaluation import (
     create_update_callback,
     create_evaluation_ui,
     create_evaluation_debug_ui
+)
+
+# 새로 추가한 대시보드 헬퍼 함수들을 노출
+from nr_bedrock_observability.bedrock_dashboard_helpers import (
+    record_role_based_events,
+    record_search_results,
+    record_bedrock_response,
+    extract_claude_response_text,
+    get_sample_nrql_queries,
+    search_knowledge_base
 )
 
 # 패키지 버전 정보
@@ -51,7 +64,14 @@ __all__ = [
     'update_evaluation_state',
     'create_update_callback',
     'create_evaluation_ui',
-    'create_evaluation_debug_ui'
+    'create_evaluation_debug_ui',
+    # 새로 추가한 대시보드 헬퍼 함수들
+    'record_role_based_events',
+    'record_search_results',
+    'record_bedrock_response',
+    'extract_claude_response_text',
+    'get_sample_nrql_queries',
+    'search_knowledge_base'
 ]
 
 # monitor_bedrock이 이미 .monitor에서 import되어 있으므로
