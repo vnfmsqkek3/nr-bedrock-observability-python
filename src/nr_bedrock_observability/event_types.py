@@ -11,6 +11,7 @@ class EventType:
     LLM_OPENSEARCH_RESULT = "LlmOpenSearchResult"
     LLM_RAG_CONTEXT = "LlmRagContext"
     LLM_FEEDBACK = "LlmFeedback"
+    LLM_USER_RESPONSE_EVALUATION = "LlmUserResponseEvaluation"
 
 # 이벤트 속성 (메타데이터) 타입
 EventAttributes = Dict[str, Union[str, int, float, bool, None]]
@@ -327,6 +328,67 @@ class FeedbackAttributes(TypedDict, total=False):
     trace_id: Optional[str]
     completion_id: Optional[str]
     timestamp: int
+
+class UserResponseEvaluationAttributes(TypedDict, total=False):
+    """
+    LLM 응답에 대한 사용자 반응 평가 속성
+    """
+    id: str
+    applicationName: str
+    user_id: Optional[str]
+    session_id: Optional[str]
+    trace_id: Optional[str]
+    completion_id: Optional[str]
+    timestamp: int
+    
+    # 모델 정보
+    model_id: str  # 평가 대상 모델 ID (예: anthropic.claude-3-sonnet-20240229-v1:0)
+    model_provider: Optional[str]  # 모델 제공 업체 (예: anthropic, amazon, mistral)
+    model_name: Optional[str]  # 정규화된 모델 이름 (예: claude-3-sonnet)
+    model_version: Optional[str]  # 모델 버전 (예: 20240229-v1:0)
+    
+    # Bedrock 지식 기반 관련
+    kb_id: Optional[str]  # Bedrock 지식 기반 ID
+    kb_name: Optional[str]  # 지식 기반 이름
+    kb_data_source_count: Optional[int]  # 지식 기반의 데이터 소스 수
+    kb_used_in_query: Optional[bool]  # 이 쿼리에서 지식 기반이 사용되었는지 여부
+    
+    # LangChain 관련
+    langchain_used: Optional[bool]  # LangChain 사용 여부
+    langchain_version: Optional[str]  # LangChain 버전
+    langchain_chain_type: Optional[str]  # 사용된 체인 유형 (예: LLMChain, RetrievalQA)
+    langchain_retriever_type: Optional[str]  # 사용된 검색기 유형
+    langchain_embedding_model: Optional[str]  # 사용된 임베딩 모델
+    
+    # 만족도 평가 점수 (1-10 척도)
+    overall_score: int
+    
+    # 모델 성능 평가 요소 (1-10 척도)
+    relevance_score: Optional[int]  # 질문 관련성 점수
+    accuracy_score: Optional[int]   # 정보 정확성 점수
+    completeness_score: Optional[int]  # 응답 완성도/상세함 점수
+    coherence_score: Optional[int]  # 응답 일관성/논리 점수
+    helpfulness_score: Optional[int]  # 유용성/도움 정도 점수
+    creativity_score: Optional[int]  # 창의성 점수 (필요시)
+    
+    # 응답 시간 관련 평가
+    response_time_score: Optional[int]  # 응답 속도 만족도 점수
+    response_time_ms: Optional[int]  # 실제 응답 시간 (밀리초)
+    
+    # 추가 피드백
+    feedback_comment: Optional[str]  # 자유 형식 피드백 코멘트
+    
+    # 메타데이터
+    query_type: Optional[str]  # 질문 유형 (factual, creative, coding 등)
+    context_size: Optional[int]  # 컨텍스트 크기 (토큰)
+    domain: Optional[str]  # 도메인 분야 (예: 기술, 과학, 일반 지식)
+    total_tokens: Optional[int]  # 총 토큰 수
+    prompt_tokens: Optional[int]  # 프롬프트 토큰 수
+    completion_tokens: Optional[int]  # 완성 토큰 수
+    
+    # 내부 태깅
+    evaluation_source: Optional[str]  # 평가 출처 (예: 'streamlit', 'api', 'cli')
+    evaluator_type: Optional[str]  # 평가자 타입 (예: 'end-user', 'expert', 'developer')
 
 # 에러 메시지에서 표준화된 오류 객체 생성
 def create_error_from_exception(error: Exception) -> BedrockError:

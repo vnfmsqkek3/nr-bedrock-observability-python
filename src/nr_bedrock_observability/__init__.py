@@ -4,18 +4,30 @@ New Relic AWS Bedrock 모니터링 라이브러리
 
 # 모듈을 직접 import하면 monitor_bedrock 함수 사용 가능
 from .monitor import monitor_bedrock, monitor_opensearch_results, link_rag_workflow
-from .streamlit_feedback import create_feedback_collector, StreamlitFeedbackCollector
+from .response_evaluation import (
+    ResponseEvaluationCollector, 
+    create_response_evaluation_collector
+)
+from .streamlit_response_evaluation import (
+    StreamlitResponseEvaluationCollector, 
+    create_streamlit_response_evaluation_collector
+)
+from .event_types import EventType, UserResponseEvaluationAttributes
 
 # 패키지 버전 정보
-__version__ = "1.3.0"
+__version__ = "1.5.0"
 
 # 공개 API
 __all__ = [
     'monitor_bedrock',
     'monitor_opensearch_results',
     'link_rag_workflow',
-    'create_feedback_collector',
-    'StreamlitFeedbackCollector'
+    'ResponseEvaluationCollector',
+    'create_response_evaluation_collector',
+    'StreamlitResponseEvaluationCollector',
+    'create_streamlit_response_evaluation_collector',
+    'EventType',
+    'UserResponseEvaluationAttributes'
 ]
 
 # monitor_bedrock이 이미 .monitor에서 import되어 있으므로

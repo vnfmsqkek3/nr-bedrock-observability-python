@@ -1,32 +1,36 @@
 from setuptools import setup, find_packages
 
+def read_version():
+    with open("src/nr_bedrock_observability/__init__.py", "r") as f:
+        for line in f:
+            if line.startswith("__version__"):
+                # __version__ = "0.1.0" -> 0.1.0
+                return line.split("=")[1].strip().strip('"')
+    return "0.0.0"
+
 setup(
     name="nr-bedrock-observability",
-    version="1.3.0",
+    version="1.5.0",
     description="New Relic observability for AWS Bedrock",
     author="New Relic",
-    author_email="opensource@newrelic.com",
+    author_email="info@newrelic.com",
     url="https://github.com/newrelic/nr-bedrock-observability-python",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        "newrelic>=8.0.0",
-        "boto3>=1.28.0",
-        "botocore>=1.31.0"
+        "boto3>=1.26.0",
+        "newrelic>=8.8.0",
     ],
     extras_require={
         "dev": [
-            "pytest>=7.0.0",
-            "pytest-cov>=4.0.0",
-            "black>=23.0.0",
+            "pytest>=7.3.1",
+            "pytest-cov>=4.1.0",
+            "black>=23.3.0",
             "isort>=5.12.0",
             "flake8>=6.0.0",
-            "mypy>=1.0.0",
-            "twine>=4.0.0",
-            "build>=1.0.0",
         ],
         "streamlit": [
-            "streamlit>=1.20.0"
+            "streamlit>=1.22.0",
         ],
     },
     python_requires=">=3.8",
@@ -46,4 +50,7 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     keywords=["aws", "bedrock", "observability", "monitoring", "llm", "newrelic", "telemetry", "streamlit"],
+    entry_points={
+        "console_scripts": [],
+    },
 ) 
