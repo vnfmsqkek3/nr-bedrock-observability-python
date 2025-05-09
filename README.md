@@ -124,12 +124,6 @@ AWS Bedrock API 호출을 모니터링하고 성능 지표를 New Relic에 전�
 pip install -i https://test.pypi.org/simple/ nr-bedrock-observability
 ```
 
-### Streamlit 지원 추가
-
-```bash
-pip install -i https://test.pypi.org/simple/ nr-bedrock-observability[streamlit]
-```
-
 ## 기본 사용법
 
 
