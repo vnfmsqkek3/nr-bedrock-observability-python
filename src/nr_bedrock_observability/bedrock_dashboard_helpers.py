@@ -4,12 +4,32 @@ Bedrock 대시보드 및 모니터링 헬퍼 함수
 이 모듈은 Streamlit 기반 Bedrock 모니터링 앱을 위한 도우미 함수들을 제공합니다.
 """
 
-import streamlit as st
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
+    # Streamlit이 없는 경우 더미 모듈 생성
+    class DummyStreamlit:
+        def __getattr__(self, name):
+            def dummy_func(*args, **kwargs):
+                # 로깅 대신 조용히 무시하거나 경고만 출력
+                pass
+            return dummy_func
+    
+    st = DummyStreamlit()
+
 import boto3
 import json
 import uuid
 import time
-import newrelic.agent
+
+try:
+    import newrelic.agent
+    NEWRELIC_AVAILABLE = True
+except ImportError:
+    NEWRELIC_AVAILABLE = False
+
 from .event_types import EventType
 
 # 이벤트 타입 상수 정의
@@ -45,11 +65,17 @@ def record_role_based_events(
     :return: 기록 성공 여부
     """
     try:
+        if not NEWRELIC_AVAILABLE:
+            if STREAMLIT_AVAILABLE:
+                st.warning("New Relic이 설치되지 않았습니다. 이벤트를 기록할 수 없습니다.")
+            return False
+        
         # 트랜잭션 및 애플리케이션 확인
         nr_app = newrelic.agent.application()
         
         if not nr_app:
-            st.warning("New Relic 애플리케이션을 찾을 수 없습니다. 역할별 이벤트를 기록할 수 없습니다.")
+            if STREAMLIT_AVAILABLE:
+                st.warning("New Relic 애플리케이션을 찾을 수 없습니다. 역할별 이벤트를 기록할 수 없습니다.")
             return False
         
         completion_id = completion_id or trace_id
@@ -103,9 +129,10 @@ def record_role_based_events(
         return True
         
     except Exception as e:
-        st.error(f"역할별 이벤트 기록 중 오류: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+        if STREAMLIT_AVAILABLE:
+            st.error(f"역할별 이벤트 기록 중 오류: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
         return False
 
 def record_search_results(
@@ -134,9 +161,15 @@ def record_search_results(
     :return: 기록 성공 여부
     """
     try:
+        if not NEWRELIC_AVAILABLE:
+            if STREAMLIT_AVAILABLE:
+                st.warning("New Relic이 설치되지 않았습니다. 검색 결과를 기록할 수 없습니다.")
+            return False
+        
         nr_app = newrelic.agent.application()
         if not nr_app:
-            st.warning("New Relic 애플리케이션을 찾을 수 없어 검색 결과를 기록하지 않았습니다.")
+            if STREAMLIT_AVAILABLE:
+                st.warning("New Relic 애플리케이션을 찾을 수 없어 검색 결과를 기록하지 않았습니다.")
             return False
             
         timestamp = int(time.time() * 1000)
@@ -170,9 +203,10 @@ def record_search_results(
         
         return True
     except Exception as e:
-        st.warning(f"OpenSearch 결과 모니터링 중 오류: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+        if STREAMLIT_AVAILABLE:
+            st.warning(f"OpenSearch 결과 모니터링 중 오류: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
         return False
 
 def record_bedrock_response(
@@ -209,9 +243,15 @@ def record_bedrock_response(
     :return: 기록 성공 여부
     """
     try:
+        if not NEWRELIC_AVAILABLE:
+            if STREAMLIT_AVAILABLE:
+                st.warning("New Relic이 설치되지 않았습니다. Bedrock 응답을 기록할 수 없습니다.")
+            return False
+        
         nr_app = newrelic.agent.application()
         if not nr_app:
-            st.warning("New Relic 애플리케이션을 찾을 수 없어 Bedrock 응답을 기록하지 않았습니다.")
+            if STREAMLIT_AVAILABLE:
+                st.warning("New Relic 애플리케이션을 찾을 수 없어 Bedrock 응답을 기록하지 않았습니다.")
             return False
             
         # 토큰 사용량 추출
@@ -269,9 +309,10 @@ def record_bedrock_response(
         
         return True
     except Exception as e:
-        st.warning(f"Bedrock 응답 기록 중 오류: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+        if STREAMLIT_AVAILABLE:
+            st.warning(f"Bedrock 응답 기록 중 오류: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
         return False
 
 def extract_claude_response_text(response_body):
