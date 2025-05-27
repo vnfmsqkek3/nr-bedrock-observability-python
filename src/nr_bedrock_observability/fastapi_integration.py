@@ -22,6 +22,17 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
+    # FastAPI가 없는 경우 더미 클래스들 정의
+    class BaseHTTPMiddleware:
+        def __init__(self, app):
+            pass
+    
+    class Request:
+        pass
+    
+    class Response:
+        pass
+    
     logging.warning("FastAPI 또는 NewRelic 패키지를 찾을 수 없습니다.")
 
 logger = logging.getLogger(__name__)
