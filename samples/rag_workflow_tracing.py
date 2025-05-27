@@ -13,7 +13,7 @@ import time
 import uuid
 import boto3
 import newrelic.agent
-from newrelic.api.transaction import current_transaction
+import newrelic.api.transaction
 from newrelic.api.time_trace import TimeTrace
 from newrelic.common.object_wrapper import wrap_function_wrapper
 from nr_bedrock_observability import monitor_bedrock
@@ -29,7 +29,6 @@ def get_bedrock_client(region_name='ap-northeast-2'):
 # 커스텀 함수 트레이스를 위한 컨텍스트 매니저
 class CustomFunctionTrace(TimeTrace):
     def __init__(self, name, group='Custom', trace_id=None):
-        # TimeTrace.__init__()는 name과 group을 파라미터로 받지 않음
         super(CustomFunctionTrace, self).__init__()
         self.name = name
         self.group = group
@@ -37,12 +36,8 @@ class CustomFunctionTrace(TimeTrace):
         
     def __enter__(self):
         result = super(CustomFunctionTrace, self).__enter__()
-        
-        transaction = current_transaction()
-        if transaction and self.trace_id:
-            # 현재 스팬에 트레이스 ID와 기타 필요한 메타데이터 추가
+        if self.trace_id:
             newrelic.agent.add_custom_span_attribute('trace.id', self.trace_id)
-            
         return result
 
 # OpenSearch 검색 함수
@@ -199,14 +194,15 @@ def rag_workflow(user_query, opensearch_domain, index_name):
     4. Bedrock LLM 모델로 응답 생성
     """
     try:
-        # 고유 트레이스 ID 생성
+        transaction = newrelic.api.transaction.current_transaction()
+        if transaction:
+            transaction.add_custom_attribute('workflow.type', 'rag')
+        
         trace_id = str(uuid.uuid4())
         
         # 트랜잭션에 메타데이터 추가
-        transaction = current_transaction()
         if transaction:
             transaction.add_custom_attribute('trace.id', trace_id)
-            transaction.add_custom_attribute('workflow.type', 'rag')
             transaction.add_custom_attribute('user.query', user_query)
             
             # 트레이스 ID를 New Relic의 distributed tracing 시스템에 연결
