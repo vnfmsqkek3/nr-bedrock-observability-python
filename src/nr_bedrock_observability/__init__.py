@@ -38,8 +38,17 @@ from .bedrock_dashboard_helpers import (
     search_knowledge_base
 )
 
+# FastAPI 통합 기능들을 노출
+from .fastapi_integration import (
+    BedrockObservabilityMiddleware,
+    bedrock_trace,
+    record_rag_workflow,
+    get_trace_id_from_request,
+    add_trace_id_to_response
+)
+
 # 패키지 버전 정보
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 
 # 공개 API
 __all__ = [
@@ -68,7 +77,13 @@ __all__ = [
     'record_bedrock_response',
     'extract_claude_response_text',
     'get_sample_nrql_queries',
-    'search_knowledge_base'
+    'search_knowledge_base',
+    # FastAPI 통합 기능들
+    'BedrockObservabilityMiddleware',
+    'bedrock_trace',
+    'record_rag_workflow',
+    'get_trace_id_from_request',
+    'add_trace_id_to_response'
 ]
 
 # monitor_bedrock이 이미 .monitor에서 import되어 있으므로
