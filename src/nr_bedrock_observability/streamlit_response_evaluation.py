@@ -10,8 +10,28 @@ import uuid
 import time
 from typing import Dict, Any, Optional, List, Union, Callable
 
-import streamlit as st
-import newrelic.agent
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
+    # Streamlit이 없는 경우 더미 모듈 생성
+    class DummyStreamlit:
+        class session_state:
+            pass
+        
+        def __getattr__(self, name):
+            def dummy_func(*args, **kwargs):
+                raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
+            return dummy_func
+    
+    st = DummyStreamlit()
+
+try:
+    import newrelic.agent
+    NEWRELIC_AVAILABLE = True
+except ImportError:
+    NEWRELIC_AVAILABLE = False
 
 from .response_evaluation import ResponseEvaluationCollector
 from .generic_response_evaluation import send_evaluation, get_evaluation_collector, reset_evaluation_collector
@@ -38,6 +58,9 @@ def init_response_evaluation_collector(
     :param collector_session_key: 세션 상태에서 수집기를 저장할 키
     :return: 초기화된 ResponseEvaluationCollector 인스턴스
     """
+    if not STREAMLIT_AVAILABLE:
+        raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
+    
     # 세션 상태가 아직 초기화되지 않았다면 초기화
     if not hasattr(st, 'session_state'):
         raise RuntimeError("Streamlit 세션 상태가 초기화되지 않았습니다.")
@@ -76,6 +99,8 @@ def ensure_evaluation_state(eval_key: str, default_values: Optional[Dict[str, An
     :param default_values: 기본값 딕셔너리 (없으면 기본값 사용)
     :return: 현재 평가 상태
     """
+    if not STREAMLIT_AVAILABLE:
+        raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
     # 기본 값 설정
     if default_values is None:
         default_values = {
@@ -107,6 +132,8 @@ def update_evaluation_state(eval_key: str, field: str, value: Any) -> None:
     :param field: 업데이트할 필드 이름
     :param value: 새 값
     """
+    if not STREAMLIT_AVAILABLE:
+        raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
     if eval_key in st.session_state:
         st.session_state[eval_key][field] = value
 
@@ -118,6 +145,8 @@ def create_update_callback(eval_key: str, field_name: str) -> Callable:
     :param field_name: 업데이트할 필드 이름
     :return: 콜백 함수
     """
+    if not STREAMLIT_AVAILABLE:
+        raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
     def callback():
         widget_key = f"{field_name}_{eval_key}"
         if widget_key in st.session_state and eval_key in st.session_state:
@@ -169,6 +198,9 @@ def create_evaluation_ui(
     :param on_submit_success: 평가 제출 성공 시 호출될 콜백 함수
     :return: 현재 평가 상태
     """
+    if not STREAMLIT_AVAILABLE:
+        raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
+    
     # 평가 상태 초기화
     evaluation_state = ensure_evaluation_state(eval_key)
     
@@ -423,6 +455,8 @@ def create_evaluation_debug_ui(
     :param model_id: 모델 ID
     :param application_name: 애플리케이션 이름
     """
+    if not STREAMLIT_AVAILABLE:
+        raise ImportError("Streamlit이 설치되지 않았습니다. 'pip install streamlit'로 설치하세요.")
     # 디버그 로그 초기화
     if "debug_logs" not in st.session_state:
         st.session_state.debug_logs = []
