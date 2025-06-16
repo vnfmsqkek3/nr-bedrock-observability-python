@@ -63,8 +63,11 @@ class BedrockChatCompletionEventDataFactory:
         else:
             factory_options = options
         
-        # ID 생성
+        # completion_id 결정 - context_data에서 제공된 ID가 있으면 사용, 없으면 새로 생성
         completion_id = str(uuid.uuid4())
+        # options에서 context_data 확인
+        if isinstance(options, dict) and 'context_data' in options and options['context_data'] and 'completion_id' in options['context_data']:
+            completion_id = options['context_data']['completion_id']
         
         # 요청 및 응답 데이터
         request = factory_options.request

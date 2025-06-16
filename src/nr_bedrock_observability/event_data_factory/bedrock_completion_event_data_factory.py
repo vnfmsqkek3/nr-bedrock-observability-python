@@ -68,9 +68,14 @@ class BedrockCompletionEventDataFactory:
             # 완료 이유 추출
             finish_reason = self._extract_finish_reason(response_body, model_id)
             
+            # completion_id 결정 - context_data에서 제공된 ID가 있으면 사용, 없으면 새로 생성
+            completion_id = str(uuid.uuid4())
+            if context_data and 'completion_id' in context_data:
+                completion_id = context_data['completion_id']
+            
             # 공통 필수 속성 설정
             attributes = {
-                'id': str(uuid.uuid4()),
+                'id': completion_id,  # context_data에서 제공된 completion_id 사용
                 'applicationName': self.application_name,
                 'request_model': model_id,
                 'response_model': model_id,  # 요청과 응답 모델이 동일

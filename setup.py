@@ -9,43 +9,30 @@ def read_version():
     return "0.0.0"
 
 setup(
-    name="nr-bedrock-observability",
-    version="2.0.3",
-    description="New Relic observability for AWS Bedrock",
-    author="New Relic",
-    author_email="czy1023@mz.co.kr",
-    url="https://github.com/newrelic/nr-bedrock-observability-python",
+    name="nr-bedrock-observability-python",
+    version="2.2.0",
+    description="AWS Bedrock monitoring library for New Relic with complete automation",
+    author="YourName",
+    author_email="your.email@example.com",
+    url="https://github.com/yourusername/nr-bedrock-observability-python",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        "boto3>=1.26.0",
-        "newrelic>=8.8.0",
+        "boto3>=1.28.0",
+        "newrelic>=8.0.0",
+        "streamlit>=1.28.0"
     ],
-    extras_require={
-        "dev": [
-            "pytest>=7.3.1",
-            "pytest-cov>=4.1.0",
-            "black>=23.3.0",
-            "isort>=5.12.0",
-            "flake8>=6.0.0",
-        ],
-        "streamlit": [
-            "streamlit>=1.22.0",
-        ],
-    },
     python_requires=">=3.8",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: Apache Software License",
+        "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
-        "Topic :: Software Development :: Libraries :: Python Modules",
-        "Topic :: System :: Monitoring",
     ],
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

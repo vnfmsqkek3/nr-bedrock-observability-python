@@ -66,8 +66,11 @@ class BedrockCompletionEventDataFactory:
         input_text = self._extract_prompt(parsed_request_body, model_id)
         output_text = self._extract_completion_text(parsed_response_body, model_id, is_rag)
         
-        # 고유 ID 생성
+        # completion_id 결정 - context_data에서 제공된 ID가 있으면 사용, 없으면 새로 생성
         completion_id = str(uuid.uuid4())
+        # options에서 context_data 확인
+        if 'context_data' in options and options['context_data'] and 'completion_id' in options['context_data']:
+            completion_id = options['context_data']['completion_id']
         
         # 완성 속성 생성
         attributes: CompletionAttributes = {

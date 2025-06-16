@@ -1,6 +1,7 @@
 import time
 import logging
 import io  # 추가: 바이트 입출력을 위한 io 모듈
+import os  # 추가: New Relic 라이센스 키 자동 감지용
 from typing import Dict, Any, Optional, Union, Callable, TypeVar, cast, List
 import inspect
 import json
@@ -19,6 +20,79 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar('T')  # 제네릭 타입 변수
 
+def _get_newrelic_license_key(provided_key: Optional[str] = None) -> Optional[str]:
+    """
+    New Relic 라이센스 키를 다양한 소스에서 자동으로 가져옵니다
+    
+    우선순위:
+    1. 제공된 키 (provided_key)
+    2. 환경변수 NEW_RELIC_LICENSE_KEY
+    3. newrelic.agent에서 설정 가져오기
+    4. newrelic.ini 파일 직접 읽기
+    
+    :param provided_key: 직접 제공된 라이센스 키
+    :return: 발견된 라이센스 키 또는 None
+    """
+    
+    # 1. 제공된 키가 있고 유효한 경우
+    if provided_key and provided_key.strip() and provided_key != "XXXXXXXXXXXX":
+        return provided_key.strip()
+    
+    # 2. 환경변수에서 시도
+    env_key = os.environ.get("NEW_RELIC_LICENSE_KEY")
+    if env_key and env_key.strip() and env_key != "XXXXXXXXXXXX":
+        logger.info("New Relic 라이센스 키를 환경변수에서 찾았습니다")
+        return env_key.strip()
+    
+    # 3. newrelic.agent에서 설정 가져오기 시도
+    try:
+        import newrelic.agent
+        app = newrelic.agent.application()
+        if app and hasattr(app, 'settings'):
+            settings = app.settings
+            if hasattr(settings, 'license_key') and settings.license_key:
+                logger.info("New Relic 라이센스 키를 에이전트 설정에서 찾았습니다")
+                return settings.license_key
+    except Exception as e:
+        logger.debug(f"New Relic 에이전트에서 라이센스 키를 가져올 수 없습니다: {str(e)}")
+    
+    # 4. newrelic.ini 파일 직접 읽기 시도
+    try:
+        import configparser
+        
+        # 가능한 newrelic.ini 파일 위치들
+        possible_paths = [
+            'newrelic.ini',
+            './newrelic.ini',
+            '../newrelic.ini',
+            '../../newrelic.ini',
+            os.path.expanduser('~/newrelic.ini'),
+            '/etc/newrelic.ini'
+        ]
+        
+        for config_path in possible_paths:
+            if os.path.exists(config_path):
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                # [newrelic] 섹션에서 license_key 찾기
+                if config.has_section('newrelic') and config.has_option('newrelic', 'license_key'):
+                    license_key = config.get('newrelic', 'license_key')
+                    if license_key and license_key.strip():
+                        logger.info(f"New Relic 라이센스 키를 newrelic.ini 파일에서 찾았습니다: {config_path}")
+                        return license_key.strip()
+    except Exception as e:
+        logger.debug(f"newrelic.ini 파일을 읽는 중 오류 발생: {str(e)}")
+    
+    # 모든 방법이 실패한 경우
+    logger.warning("New Relic 라이센스 키를 찾을 수 없습니다. 다음 중 하나의 방법으로 설정해주세요:")
+    logger.warning("1. monitor_bedrock 호출 시 new_relic_api_key 파라미터 제공")
+    logger.warning("2. 환경변수 NEW_RELIC_LICENSE_KEY 설정")
+    logger.warning("3. newrelic.ini 파일에 license_key 설정")
+    logger.warning("4. New Relic 에이전트가 올바르게 초기화되었는지 확인")
+    
+    return None
+
 class MonitorBedrockOptions:
     """
     AWS Bedrock 모니터링 옵션
@@ -32,7 +106,13 @@ class MonitorBedrockOptions:
         track_token_usage: bool = True,
         disable_streaming_events: bool = False,
         collect_feedback: bool = False,
-        feedback_callback: Optional[Callable] = None
+        feedback_callback: Optional[Callable] = None,
+        auto_generate_ids: bool = True,
+        auto_extract_context: bool = True,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        auto_record_events: bool = True,
+        streamlit_integration: bool = False
     ):
         self.application_name = application_name
         self.new_relic_api_key = new_relic_api_key
@@ -42,6 +122,12 @@ class MonitorBedrockOptions:
         self.disable_streaming_events = disable_streaming_events
         self.collect_feedback = collect_feedback
         self.feedback_callback = feedback_callback
+        self.auto_generate_ids = auto_generate_ids
+        self.auto_extract_context = auto_extract_context
+        self.conversation_id = conversation_id
+        self.user_id = user_id
+        self.auto_record_events = auto_record_events
+        self.streamlit_integration = streamlit_integration
 
 def monitor_bedrock(
     bedrock_client: Any,
@@ -61,18 +147,38 @@ def monitor_bedrock(
     if isinstance(options, dict):
         if 'application_name' not in options:
             raise ValueError("application_name is required")
+        
+        # New Relic 라이센스 키 자동 감지
+        auto_detected_key = _get_newrelic_license_key(options.get('new_relic_api_key'))
+        
         monitor_options = MonitorBedrockOptions(
             application_name=options['application_name'],
-            new_relic_api_key=options.get('new_relic_api_key'),
+            new_relic_api_key=auto_detected_key,
             host=options.get('host'),
             port=options.get('port'),
             track_token_usage=options.get('track_token_usage', True),
             disable_streaming_events=options.get('disable_streaming_events', False),
             collect_feedback=options.get('collect_feedback', False),
-            feedback_callback=options.get('feedback_callback')
+            feedback_callback=options.get('feedback_callback'),
+            auto_generate_ids=options.get('auto_generate_ids', True),
+            auto_extract_context=options.get('auto_extract_context', True),
+            conversation_id=options.get('conversation_id'),
+            user_id=options.get('user_id'),
+            auto_record_events=options.get('auto_record_events', True),
+            streamlit_integration=options.get('streamlit_integration', False)
         )
     else:
+        # MonitorBedrockOptions 객체인 경우에도 라이센스 키 자동 감지 적용
+        auto_detected_key = _get_newrelic_license_key(options.new_relic_api_key)
+        options.new_relic_api_key = auto_detected_key
         monitor_options = options
+        
+    # Streamlit 통합 활성화 시 자동 세션 초기화
+    if monitor_options.streamlit_integration:
+        if not monitor_options.conversation_id:
+            monitor_options.conversation_id = _initialize_streamlit_session()
+        else:
+            _initialize_streamlit_session(monitor_options.conversation_id)
         
     # Bedrock 설정 추출
     bedrock_configuration = None
@@ -128,6 +234,115 @@ def monitor_bedrock(
             trace_id = request.pop('_trace_id', None) if isinstance(request, dict) else None
             context_data = request.pop('_context_data', None) if isinstance(request, dict) else None
             
+            # 자동 ID 생성 및 컨텍스트 추출 (옵션이 활성화된 경우)
+            if monitor_options.auto_generate_ids:
+                if not trace_id:
+                    trace_id = str(uuid.uuid4())
+                    
+                if not context_data:
+                    context_data = {}
+                    
+                if 'completion_id' not in context_data:
+                    context_data['completion_id'] = str(uuid.uuid4())
+                    
+                if monitor_options.conversation_id and 'conversation_id' not in context_data:
+                    context_data['conversation_id'] = monitor_options.conversation_id
+                    
+                if monitor_options.user_id and 'user_id' not in context_data:
+                    context_data['user_id'] = monitor_options.user_id
+                    
+            # 자동 컨텍스트 추출 (옵션이 활성화된 경우)
+            if monitor_options.auto_extract_context and isinstance(request, dict):
+                if not context_data:
+                    context_data = {}
+                    
+                # 요청 본문에서 사용자 쿼리 추출 시도
+                if 'user_query' not in context_data:
+                    try:
+                        request_body = _parse_body(request.get('body', {}))
+                        if 'messages' in request_body:
+                            # Claude 메시지 형식에서 사용자 쿼리 추출
+                            for message in request_body['messages']:
+                                if message.get('role') == 'user':
+                                    content = message.get('content', [])
+                                    if isinstance(content, list) and len(content) > 0:
+                                        text_content = content[0].get('text', '') if isinstance(content[0], dict) else str(content[0])
+                                        if text_content:
+                                            context_data['user_query'] = text_content
+                                            break
+                                    elif isinstance(content, str):
+                                        context_data['user_query'] = content
+                                        break
+                        elif 'prompt' in request_body:
+                            # 일반 프롬프트 형식
+                            context_data['user_query'] = request_body['prompt']
+                            
+                        # 시스템 프롬프트 추출 (있는 경우)
+                        if 'system' in request_body and 'system_prompt' not in context_data:
+                            context_data['system_prompt'] = request_body['system']
+                            
+                    except Exception as e:
+                        logger.debug(f"사용자 쿼리 자동 추출 중 오류: {str(e)}")
+                        
+                # Streamlit 통합 시 추가 정보 추출
+                if monitor_options.streamlit_integration:
+                    try:
+                        import streamlit as st
+                        if hasattr(st, 'session_state'):
+                            # 메시지 카운트 자동 증가
+                            if not hasattr(st.session_state, 'message_count'):
+                                st.session_state.message_count = 0
+                            st.session_state.message_count += 1
+                            context_data['message_index'] = st.session_state.message_count
+                    except Exception as e:
+                        logger.debug(f"Streamlit 통합 중 오류: {str(e)}")
+            
+            # 자동 이벤트 기록 함수 (응답 후 호출용)
+            def auto_record_events(response_info):
+                assistant_response = ""
+                
+                if monitor_options.auto_record_events:
+                    try:
+                        # 응답 시간 계산
+                        response_time_ms = response_info.get('response_time', 0) * 1000
+                        
+                        # 응답 데이터 추출
+                        response_body = response_info.get('response_data', {}).get('parsed_body', {})
+                        
+                        # 역할별 이벤트 자동 기록
+                        _auto_record_role_based_events(
+                            context_data=context_data,
+                            trace_id=trace_id,
+                            application_name=monitor_options.application_name
+                        )
+                        
+                        # Bedrock 응답 자동 기록 및 텍스트 추출
+                        assistant_response = _auto_record_bedrock_response(
+                            response_body=response_body,
+                            response_time_ms=int(response_time_ms),
+                            trace_id=trace_id,
+                            context_data=context_data,
+                            request=request,
+                            application_name=monitor_options.application_name
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"자동 이벤트 기록 중 오류: {str(e)}")
+                
+                # 기존 처리 계속
+                _handle_invoke_model_response(
+                    request, 
+                    response_info, 
+                    completion_event_data_factory, 
+                    event_client,
+                    trace_id,
+                    context_data
+                )
+                
+                # 추출된 응답 텍스트를 response_info에 추가
+                if assistant_response:
+                    response_info['extracted_text'] = assistant_response
+            
             # 트랜잭션 관리
             try:
                 import newrelic.agent
@@ -144,14 +359,7 @@ def monitor_bedrock(
                         # 응답 모니터링
                         return monitor_response(
                             lambda: invoke_model_func(*args, **kwargs),
-                            lambda response_info: _handle_invoke_model_response(
-                                request, 
-                                response_info, 
-                                completion_event_data_factory, 
-                                event_client,
-                                trace_id,
-                                context_data
-                            )
+                            auto_record_events
                         )
                 else:
                     logger.warning("New Relic 애플리케이션을 찾을 수 없습니다. 트랜잭션 없이 진행합니다.")
@@ -163,14 +371,7 @@ def monitor_bedrock(
             # 트랜잭션 없이 진행 (에러 발생 또는 New Relic 없음)
             return monitor_response(
                 lambda: invoke_model_func(*args, **kwargs),
-                lambda response_info: _handle_invoke_model_response(
-                    request, 
-                    response_info, 
-                    completion_event_data_factory, 
-                    event_client,
-                    trace_id,
-                    context_data
-                )
+                auto_record_events
             )
             
         return patched_invoke_model
@@ -240,6 +441,46 @@ def monitor_bedrock(
             # 트레이스 ID와 컨텍스트 데이터 추출 (RAG 워크플로우 연결용)
             trace_id = request.pop('_trace_id', None) if isinstance(request, dict) else None
             context_data = request.pop('_context_data', None) if isinstance(request, dict) else None
+            
+            # 자동 ID 생성 및 컨텍스트 추출 (옵션이 활성화된 경우)
+            if monitor_options.auto_generate_ids:
+                if not trace_id:
+                    trace_id = str(uuid.uuid4())
+                    
+                if not context_data:
+                    context_data = {}
+                    
+                if 'completion_id' not in context_data:
+                    context_data['completion_id'] = str(uuid.uuid4())
+                    
+                if monitor_options.conversation_id and 'conversation_id' not in context_data:
+                    context_data['conversation_id'] = monitor_options.conversation_id
+                    
+                if monitor_options.user_id and 'user_id' not in context_data:
+                    context_data['user_id'] = monitor_options.user_id
+                    
+            # 자동 컨텍스트 추출 (옵션이 활성화된 경우)
+            if monitor_options.auto_extract_context and isinstance(request, dict):
+                if not context_data:
+                    context_data = {}
+                    
+                # 요청에서 사용자 메시지 추출 시도 (converse API 형식)
+                if 'user_query' not in context_data:
+                    try:
+                        if 'messages' in request:
+                            # Converse API 메시지 형식에서 사용자 쿼리 추출
+                            for message in request['messages']:
+                                if message.get('role') == 'user':
+                                    content = message.get('content', [])
+                                    if isinstance(content, list) and len(content) > 0:
+                                        if isinstance(content[0], dict) and 'text' in content[0]:
+                                            context_data['user_query'] = content[0]['text']
+                                            break
+                                    elif isinstance(content, str):
+                                        context_data['user_query'] = content
+                                        break
+                    except Exception as e:
+                        logger.debug(f"사용자 쿼리 자동 추출 중 오류 (converse): {str(e)}")
             
             # 트랜잭션 관리
             try:
@@ -981,4 +1222,304 @@ def link_rag_workflow(
     except Exception as e:
         logger.error(f"RAG 워크플로우 연결 중 오류: {str(e)}")
     
-    return workflow_trace_id 
+    return workflow_trace_id
+
+def _auto_record_role_based_events(
+    context_data: Dict[str, Any],
+    trace_id: str,
+    application_name: str
+) -> None:
+    """
+    역할별 이벤트 자동 기록 (기존 record_role_based_events 대체)
+    """
+    try:
+        import newrelic.agent
+        
+        # 기본 이벤트 데이터
+        event_data = {
+            'trace_id': trace_id,
+            'applicationName': application_name,
+            'timestamp': int(time.time() * 1000)
+        }
+        
+        # 컨텍스트 데이터 추가
+        if context_data:
+            if 'user_query' in context_data:
+                event_data['user_query'] = context_data['user_query']
+            if 'system_prompt' in context_data:
+                event_data['system_prompt'] = context_data['system_prompt']
+            if 'completion_id' in context_data:
+                event_data['completion_id'] = context_data['completion_id']
+            if 'conversation_id' in context_data:
+                event_data['conversation_id'] = context_data['conversation_id']
+            if 'message_index' in context_data:
+                event_data['message_index'] = context_data['message_index']
+        
+        # 역할별 이벤트 기록
+        newrelic.agent.record_custom_event('LlmUserRole', event_data)
+        newrelic.agent.record_custom_event('LlmSystemRole', event_data)
+        
+    except Exception as e:
+        logger.debug(f"역할별 이벤트 자동 기록 중 오류: {str(e)}")
+
+def _auto_record_bedrock_response(
+    response_body: Dict[str, Any],
+    response_time_ms: int,
+    trace_id: str,
+    context_data: Dict[str, Any],
+    request: Dict[str, Any],
+    application_name: str
+) -> str:
+    """
+    Bedrock 응답 자동 기록 (기존 record_bedrock_response 대체)
+    응답 텍스트를 추출하여 반환하므로 앱에서 별도 추출 불필요
+    """
+    assistant_response = ""
+    
+    try:
+        import newrelic.agent
+        
+        # 응답 텍스트 자동 추출
+        try:
+            from .dashboard_helpers import extract_claude_response_text
+            assistant_response = extract_claude_response_text(response_body)
+        except Exception as e:
+            logger.debug(f"응답 텍스트 추출 중 오류: {str(e)}")
+            # fallback: 기본 추출 로직
+            if 'content' in response_body:
+                content = response_body['content']
+                if isinstance(content, list) and len(content) > 0:
+                    if isinstance(content[0], dict) and 'text' in content[0]:
+                        assistant_response = content[0]['text']
+        
+        # 기본 이벤트 데이터
+        event_data = {
+            'trace_id': trace_id,
+            'applicationName': application_name,
+            'response_time_ms': response_time_ms,
+            'timestamp': int(time.time() * 1000),
+            'model_id': request.get('modelId', ''),
+            'kb_used_in_query': False  # Knowledge Base 사용 안함
+        }
+        
+        # 컨텍스트 데이터 추가
+        if context_data:
+            if 'completion_id' in context_data:
+                event_data['completion_id'] = context_data['completion_id']
+            if 'conversation_id' in context_data:
+                event_data['conversation_id'] = context_data['conversation_id']
+            if 'message_index' in context_data:
+                event_data['message_index'] = context_data['message_index']
+        
+        # 응답 텍스트 추가
+        if assistant_response:
+            event_data['assistant_response'] = assistant_response[:1000]  # 길이 제한
+        
+        # 토큰 정보 추출
+        try:
+            usage = response_body.get("usage", {})
+            total_tokens = usage.get("total_token_count", 0) or (usage.get("input_tokens", 0) + usage.get("output_tokens", 0))
+            input_tokens = usage.get("input_token_count", 0) or usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_token_count", 0) or usage.get("output_tokens", 0)
+            
+            if total_tokens > 0:
+                event_data['total_tokens'] = total_tokens
+            if input_tokens > 0:
+                event_data['prompt_tokens'] = input_tokens
+            if output_tokens > 0:
+                event_data['completion_tokens'] = output_tokens
+        except Exception:
+            pass
+        
+        # 모델 파라미터 추출
+        try:
+            request_body = _parse_body(request.get('body', {}))
+            if 'temperature' in request_body:
+                event_data['temperature'] = request_body['temperature']
+            if 'top_p' in request_body:
+                event_data['top_p'] = request_body['top_p']
+        except Exception:
+            pass
+        
+        # Bedrock 응답 이벤트 기록
+        newrelic.agent.record_custom_event('LlmBedrockResponse', event_data)
+        
+    except Exception as e:
+        logger.debug(f"Bedrock 응답 자동 기록 중 오류: {str(e)}")
+    
+    return assistant_response
+
+def _initialize_streamlit_session(conversation_id: Optional[str] = None) -> str:
+    """
+    Streamlit 세션 자동 초기화
+    """
+    try:
+        import streamlit as st
+        
+        # 대화 ID 초기화
+        if not hasattr(st.session_state, 'conversation_id') or not st.session_state.conversation_id:
+            st.session_state.conversation_id = conversation_id or str(uuid.uuid4())
+        
+        # 메시지 카운트 초기화
+        if not hasattr(st.session_state, 'message_count'):
+            st.session_state.message_count = 0
+            
+        return st.session_state.conversation_id
+        
+    except Exception as e:
+        logger.debug(f"Streamlit 세션 초기화 중 오류: {str(e)}")
+        return conversation_id or str(uuid.uuid4())
+
+def create_streamlit_evaluation_ui(
+    trace_id: Optional[str] = None,
+    completion_id: Optional[str] = None,
+    model_id: str = "",
+    response_time_ms: Optional[int] = None,
+    total_tokens: Optional[int] = None,
+    prompt_tokens: Optional[int] = None,
+    completion_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    application_name: str = ""
+) -> None:
+    """
+    Streamlit용 자동 평가 UI 생성 (New Relic 이벤트 자동 전송 포함)
+    """
+    try:
+        import streamlit as st
+        import newrelic.agent
+        
+        st.markdown("### 모델 응답 평가")
+        
+        with st.form(f"evaluation_form_{completion_id}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                overall_score = st.slider("전체 만족도", 1, 10, 5)
+                relevance_score = st.slider("질문 관련성", 1, 10, 5)
+                accuracy_score = st.slider("정확성", 1, 10, 5)
+                
+            with col2:
+                completeness_score = st.slider("완성도", 1, 10, 5)
+                coherence_score = st.slider("일관성", 1, 10, 5)
+                helpfulness_score = st.slider("유용성", 1, 10, 5)
+            
+            feedback_comment = st.text_area("추가 피드백 (선택사항)")
+            
+            submitted = st.form_submit_button("평가 제출")
+            
+            if submitted:
+                # 평가 데이터 구성
+                evaluation_data = {
+                    "model_id": model_id,
+                    "overall_score": overall_score,
+                    "relevance_score": relevance_score,
+                    "accuracy_score": accuracy_score,
+                    "completeness_score": completeness_score,
+                    "coherence_score": coherence_score,
+                    "helpfulness_score": helpfulness_score,
+                    "evaluation_source": "streamlit-auto",
+                    "trace_id": trace_id,
+                    "completion_id": completion_id,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "application_name": application_name,
+                    "timestamp": int(time.time() * 1000)
+                }
+                
+                if feedback_comment:
+                    evaluation_data["feedback_comment"] = feedback_comment
+                
+                if response_time_ms:
+                    evaluation_data["response_time_ms"] = response_time_ms
+                    
+                if total_tokens:
+                    evaluation_data["total_tokens"] = total_tokens
+                    
+                if prompt_tokens:
+                    evaluation_data["prompt_tokens"] = prompt_tokens
+                    
+                if completion_tokens:
+                    evaluation_data["completion_tokens"] = completion_tokens
+                
+                # New Relic에 자동 전송
+                try:
+                    newrelic.agent.record_custom_event('LlmUserResponseEvaluation', evaluation_data)
+                    st.success("평가가 성공적으로 제출되었습니다!")
+                except Exception as e:
+                    st.error(f"평가 제출 중 오류: {str(e)}")
+                    
+    except Exception as e:
+        logger.error(f"평가 UI 생성 중 오류: {str(e)}")
+
+def create_streamlit_nrql_queries(
+    application_name: str,
+    trace_id: Optional[str] = None,
+    completion_id: Optional[str] = None,
+    conversation_id: Optional[str] = None
+) -> None:
+    """
+    Streamlit용 NRQL 쿼리 예제 표시
+    """
+    try:
+        import streamlit as st
+        
+        with st.expander("📊 New Relic 쿼리 예제", expanded=False):
+            st.markdown("### 모니터링 데이터 분석을 위한 NRQL 쿼리")
+            
+            queries = {
+                "기본 완성 데이터": f"FROM LlmCompletion SELECT * WHERE appName = '{application_name}' SINCE 1 hour AGO",
+                "토큰 사용량 분석": f"FROM LlmCompletion SELECT sum(total_tokens), average(total_tokens) WHERE appName = '{application_name}' SINCE 1 hour AGO",
+                "응답 시간 분석": f"FROM LlmCompletion SELECT average(duration), percentile(duration, 95) WHERE appName = '{application_name}' SINCE 1 hour AGO",
+                "사용자 평가 데이터": f"FROM LlmUserResponseEvaluation SELECT * WHERE application_name = '{application_name}' SINCE 1 hour AGO",
+                "평가 점수 분석": f"FROM LlmUserResponseEvaluation SELECT average(overall_score), average(relevance_score) WHERE application_name = '{application_name}' SINCE 1 hour AGO"
+            }
+            
+            if trace_id:
+                queries["현재 트레이스"] = f"FROM LlmCompletion SELECT * WHERE trace_id = '{trace_id}' SINCE 1 hour AGO"
+                
+            if completion_id:
+                queries["현재 완성"] = f"FROM LlmCompletion SELECT * WHERE completion_id = '{completion_id}' SINCE 1 hour AGO"
+                
+            if conversation_id:
+                queries["대화별 분석"] = f"FROM LlmCompletion SELECT count(*) FACET conversation_id WHERE appName = '{application_name}' SINCE 1 hour AGO"
+            
+            for title, query in queries.items():
+                st.markdown(f"**{title}:**")
+                st.code(query, language="sql")
+                
+    except Exception as e:
+        logger.error(f"NRQL 쿼리 생성 중 오류: {str(e)}")
+
+def get_streamlit_session_info() -> Dict[str, Any]:
+    """
+    Streamlit 세션 정보 자동 추출
+    """
+    try:
+        import streamlit as st
+        
+        session_info = {}
+        
+        if hasattr(st, 'session_state'):
+            # 대화 ID
+            if hasattr(st.session_state, 'conversation_id'):
+                session_info['conversation_id'] = st.session_state.conversation_id
+            else:
+                session_info['conversation_id'] = str(uuid.uuid4())
+                st.session_state.conversation_id = session_info['conversation_id']
+            
+            # 메시지 카운트
+            if hasattr(st.session_state, 'message_count'):
+                st.session_state.message_count += 1
+            else:
+                st.session_state.message_count = 1
+            session_info['message_index'] = st.session_state.message_count
+            
+        return session_info
+        
+    except Exception as e:
+        logger.debug(f"Streamlit 세션 정보 추출 중 오류: {str(e)}")
+        return {
+            'conversation_id': str(uuid.uuid4()),
+            'message_index': 1
+        } 

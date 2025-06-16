@@ -1,5 +1,103 @@
 # 변경 이력
 
+## v2.2.0 (2024-12-19)
+
+### 주요 기능 추가
+
+- **Streamlit 완전 통합**: `create_streamlit_evaluation_ui()`, `create_streamlit_nrql_queries()`, `get_streamlit_session_info()` 함수 추가
+- **텍스트 추출 자동화**: 응답 텍스트 추출도 라이브러리에서 자동 처리 (`extract_claude_response_text` 불필요)
+- **UI 헬퍼 함수**: 평가 UI, NRQL 쿼리, 세션 관리 모두 라이브러리에서 제공
+- **제로 New Relic 코드**: 앱에서 New Relic 관련 코드 완전 제거 (라이브러리가 모든 이벤트 전송 자동 처리)
+
+### 개선 사항
+
+- **개발자 경험 혁신**: 앱에서 `import newrelic`, `extract_claude_response_text` 등 불필요
+- **완전한 Streamlit 지원**: 프롬프트 설정, 파라미터 조정, 평가, 모니터링 모두 한 화면에서
+- **제로 보일러플레이트**: 텍스트 추출, 이벤트 전송, UI 생성 모두 자동화
+
+### 🚀 자동 패치 기능 추가
+
+**🎯 완전한 제로 설정 모니터링 구현**
+
+#### 새로운 기능
+- **enable_auto_patch()**: boto3.client('bedrock-runtime') 자동 패치 기능
+- **disable_auto_patch()**: 자동 패치 비활성화
+- 모든 bedrock-runtime 클라이언트가 자동으로 모니터링 활성화
+- 기존 코드 변경 없이 완전한 New Relic 통합
+
+#### 사용 방법
+```python
+from nr_bedrock_observability import enable_auto_patch
+
+# 한 번만 호출하면 모든 boto3.client('bedrock-runtime')가 자동으로 모니터링됩니다
+enable_auto_patch(application_name="my-app")
+
+# 이제 일반적인 boto3 코드가 자동으로 New Relic에 데이터를 전송합니다
+client = boto3.client('bedrock-runtime', region_name='us-east-1')
+response = client.invoke_model(...)  # 자동으로 모니터링됨!
+```
+
+#### 개선사항
+- simple_streamlit_example.py 완전 단순화
+- monitor_bedrock() 직접 호출 불필요
+- 기존 boto3 코드와 100% 호환
+- 자동으로 모든 Streamlit 통합 기능 활성화
+
+## v2.1.0 (2024-12-19)
+
+### 주요 기능 추가
+
+- **완전 자동화 모드**: 단순히 `monitor_bedrock()` 호출만으로 모든 New Relic 이벤트 자동 수집
+- **Streamlit 완전 통합**: `streamlit_integration=True` 옵션으로 세션 상태 자동 관리
+- **자동 이벤트 기록**: `auto_record_events=True`로 역할별/응답 이벤트 자동 기록
+- **제로 설정 모니터링**: 앱 코드에서 수동 이벤트 기록 코드 완전 제거
+
+### 개선 사항
+
+- **개발자 경험 대폭 향상**: 3줄의 코드로 완전한 New Relic 모니터링 구현
+- **제로 보일러플레이트**: 추가 설정이나 수동 코드 작성 없이 즉시 사용 가능
+- **Streamlit 네이티브 지원**: 세션 상태와 완벽하게 통합된 모니터링
+
+## v2.0.5 (2024-12-19)
+
+### 주요 기능 추가
+
+- **완전 자동화 모드**: `auto_generate_ids` 및 `auto_extract_context` 옵션 추가
+- **자동 ID 생성**: trace_id, completion_id 자동 생성 기능
+- **자동 컨텍스트 추출**: 요청 본문에서 user_query 자동 추출 기능
+- **대화 및 사용자 ID 지원**: conversation_id, user_id 옵션 추가
+
+### 개선 사항
+
+- **사용자 편의성 대폭 향상**: 단순히 monitor_bedrock() 호출만으로 모든 기능 자동 활성화
+- **Claude 메시지 형식과 일반 프롬프트 형식 모두에서 사용자 쿼리 자동 추출**
+- **Converse API에서도 사용자 메시지 자동 추출 지원**
+
+## v2.0.4 (2024-12-19)
+
+### 주요 기능 추가
+
+- **Completion ID 동기화**: 앱에서 생성한 completion_id와 라이브러리에서 New Relic에 전송하는 completion_id가 일치하도록 개선
+  - 모든 이벤트 팩토리에서 `context_data.completion_id`를 우선 사용하도록 수정
+  - BedrockCompletionEventDataFactory와 BedrockChatCompletionEventDataFactory에서 동기화 지원
+  - New Relic Span details에서 앱과 라이브러리의 ID가 일치하게 됨
+
+- **New Relic 라이센스 키 자동 감지**: 다양한 소스에서 자동으로 라이센스 키를 찾는 기능 추가
+  - 우선순위: 직접 제공된 키 → 환경변수 → New Relic 에이전트 설정 → newrelic.ini 파일
+  - `_get_newrelic_license_key()` 함수 추가로 자동 감지 구현
+  - 사용자가 라이센스 키를 수동으로 설정하지 않아도 자동으로 찾아서 사용
+
+### 개선 사항
+
+- **라이브러리 사용성 향상**: 사용자는 단순히 `{'application_name': 'app-name'}`만 제공하면 됨
+- **로깅 개선**: 라이센스 키를 어디서 찾았는지 로그로 알려줌
+- **에러 처리 강화**: 라이센스 키를 찾지 못한 경우에도 안정적으로 동작
+
+### 호환성
+
+- 기존 API와 100% 호환 유지
+- 기존 코드 수정 없이 새로운 기능 자동 적용
+
 ## v2.0.3 (2024-12-19)
 
 ### 버전 업데이트
